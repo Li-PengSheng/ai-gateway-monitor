@@ -15,6 +15,7 @@ spec:
       containers:
         - name: python-ai
           image: python-ai:v1
+          imagePullPolicy: Never
           ports:
             - containerPort: 50051 #
           readinessProbe:

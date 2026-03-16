@@ -44,7 +44,7 @@ clf.fit(iris.data, iris.target)
 
 
 class IrisPredictorServicer(iris_pb2_grpc.IrisPredictorServicer):
-    def Predict(self, request, context):
+    def IrisPredict(self, request, context):
         print(
             f"收到请求: sepal_len={request.sepal_length}, sepal_wid={request.sepal_width}..."
         )
@@ -71,7 +71,7 @@ class ModelPredictorServicer(model_pb2_grpc.ModelPredictorServicer):
         host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
         self.client = ollama.Client(host=host)
 
-    def Predict(self, request, context):
+    def ModelPredict(self, request, context):
         print(f"收到提示词: {request.prompt}")
 
         response = self.client.generate(model="qwen2.5-1.5b", prompt=request.prompt)
