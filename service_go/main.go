@@ -115,8 +115,8 @@ func main() {
 	}
 	defer conn.Close()
 
-	irisClient := irisv1.NewIrisPredictorClient(conn)
-	modelClient := modelv1.NewModelPredictorClient(conn)
+	irisClient := irisv1.NewIrisPredictorServiceClient(conn)
+	modelClient := modelv1.NewModelPredictorServiceClient(conn)
 
 	// 1. 定义全局对象池
 	var predictReqPool = sync.Pool{
