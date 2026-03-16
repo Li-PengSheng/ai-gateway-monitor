@@ -18,6 +18,6 @@ message IrisPredictResponse {
 }
 
 // 定义服务接口
-service IrisPredictorService {
+service IrisPredictor {
   rpc IrisPredict(IrisPredictRequest) returns (IrisPredictResponse);
 }
