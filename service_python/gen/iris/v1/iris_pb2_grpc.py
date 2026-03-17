@@ -19,7 +19,7 @@ class IrisPredictorStub(object):
                 '/iris.v1.IrisPredictor/IrisPredict',
                 request_serializer=iris_dot_v1_dot_iris__pb2.IrisPredictRequest.SerializeToString,
                 response_deserializer=iris_dot_v1_dot_iris__pb2.IrisPredictResponse.FromString,
-                )
+                _registered_method=True)
 
 
 class IrisPredictorServicer(object):
@@ -44,6 +44,7 @@ def add_IrisPredictorServicer_to_server(servicer, server):
     generic_handler = grpc.method_handlers_generic_handler(
             'iris.v1.IrisPredictor', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('iris.v1.IrisPredictor', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
@@ -62,8 +63,18 @@ class IrisPredictor(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/iris.v1.IrisPredictor/IrisPredict',
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/iris.v1.IrisPredictor/IrisPredict',
             iris_dot_v1_dot_iris__pb2.IrisPredictRequest.SerializeToString,
             iris_dot_v1_dot_iris__pb2.IrisPredictResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)

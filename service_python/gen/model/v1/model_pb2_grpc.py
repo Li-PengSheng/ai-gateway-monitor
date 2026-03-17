@@ -18,7 +18,7 @@ class ModelPredictorStub(object):
                 '/model.v1.ModelPredictor/ModelPredict',
                 request_serializer=model_dot_v1_dot_model__pb2.ModelPredictRequest.SerializeToString,
                 response_deserializer=model_dot_v1_dot_model__pb2.ModelPredictResponse.FromString,
-                )
+                _registered_method=True)
 
 
 class ModelPredictorServicer(object):
@@ -42,6 +42,7 @@ def add_ModelPredictorServicer_to_server(servicer, server):
     generic_handler = grpc.method_handlers_generic_handler(
             'model.v1.ModelPredictor', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('model.v1.ModelPredictor', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
@@ -59,8 +60,18 @@ class ModelPredictor(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/model.v1.ModelPredictor/ModelPredict',
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/model.v1.ModelPredictor/ModelPredict',
             model_dot_v1_dot_model__pb2.ModelPredictRequest.SerializeToString,
             model_dot_v1_dot_model__pb2.ModelPredictResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)

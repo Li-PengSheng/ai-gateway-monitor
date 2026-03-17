@@ -15,10 +15,10 @@ plugins:
     opt:
       - paths=source_relative
   # --- Python 生成配置 ---
-  - remote: buf.build/protocolbuffers/python:v25.3   # matches protobuf 4.25.x
+  - remote: buf.build/protocolbuffers/python
     out: service_python/gen
-  - remote: buf.build/grpc/python:v1.62.0
+  - remote: buf.build/grpc/python
     out: service_python/gen
-  - remote: buf.build/protocolbuffers/pyi:v25.3
+  - remote: buf.build/protocolbuffers/pyi
     out: service_python/gen
  
