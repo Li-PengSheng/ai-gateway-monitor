@@ -69,43 +69,26 @@ check_deps() {
 }
 
 patch_ollama_svc() {
-  step "Patching ollama-svc.yaml with current WSL host IP"
-  WSL_IP=$(ip route show default 2>/dev/null | awk '{print $3}' | head -1)
+  step "Patching ollama-svc.yaml with current WSL eth0 IP"
+  WSL_IP=$(ip addr show eth0 | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)
   if [[ -z "$WSL_IP" ]]; then
-    warn "Could not detect WSL host IP — skipping ollama-svc.yaml patch"
+    warn "Could not detect WSL eth0 IP — skipping ollama-svc.yaml patch"
     return
   fi
-  info "WSL host IP: $WSL_IP"
-
-  if [[ -f "$SCRIPT_DIR/ollama-svc.yaml" ]]; then
-    sed -i "s|externalName:.*|externalName: $WSL_IP|" "$SCRIPT_DIR/ollama-svc.yaml"
-    success "ollama-svc.yaml patched → externalName: $WSL_IP"
-  else
-    warn "ollama-svc.yaml not found — creating it"
-    cat > "$SCRIPT_DIR/ollama-svc.yaml" <<EOF
-apiVersion: v1
-kind: Service
-metadata:
-  name: ollama-svc
-spec:
-  type: ExternalName
-  externalName: $WSL_IP
-EOF
-    success "ollama-svc.yaml created"
-  fi
+  info "WSL eth0 IP: $WSL_IP"
+  # Patch the ip field in Endpoints
+  sed -i "s|- ip:.*|- ip: $WSL_IP|" "$SCRIPT_DIR/ollama-svc.yaml"
+  success "ollama-svc.yaml patched → $WSL_IP"
 }
 
 patch_prometheus_target() {
-  step "Patching prometheus.yml scrape target with WSL host IP"
-  WSL_IP=$(ip route show default 2>/dev/null | awk '{print $3}' | head -1)
-  if [[ -z "$WSL_IP" ]]; then
-    warn "Could not detect WSL host IP — skipping prometheus.yml patch"
-    return
-  fi
+  step "Patching prometheus.yml scrape target"
+
+  TARGET="host.docker.internal:8080"
 
   if [[ -f "$SCRIPT_DIR/prometheus.yml" ]]; then
-    sed -i "s|- \".*:8080\"|- \"$WSL_IP:8080\"|" "$SCRIPT_DIR/prometheus.yml"
-    success "prometheus.yml target patched → $WSL_IP:8080"
+    sed -i "s|- \".*:8080\"|- \"$TARGET\"|" "$SCRIPT_DIR/prometheus.yml"
+    success "prometheus.yml target patched → $TARGET"
   else
     warn "prometheus.yml not found — creating default config"
     cat > "$SCRIPT_DIR/prometheus.yml" <<EOF
@@ -114,7 +97,7 @@ global:
 scrape_configs:
   - job_name: "go-ai-gateway"
     static_configs:
-      - targets: ["$WSL_IP:8080"]
+      - targets: ["$TARGET"]
 EOF
     success "prometheus.yml created"
   fi

@@ -14,4 +14,10 @@ dependencies = [
     "grpcio>=1.78.0",
     "grpcio-tools>=1.78.0",
     "protobuf>=6.33.5",
+    "pydantic>=2.12.5",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.6",
 ]
