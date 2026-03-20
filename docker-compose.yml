@@ -1,4 +1,4 @@
-version: "3.8"
+# version: "3.8"
 
 services:
   # AI 模型服务
@@ -48,6 +48,19 @@ services:
     ports:
       - "16686:16686" # UI 界面，从 Windows 浏览器访问
       - "4317:4317" # OTLP 接收端口（gRPC）
+    networks:
+      - ai-network
+
+  nvidia-gpu-exporter:
+    image: utkuozdemir/nvidia_gpu_exporter:1.1.0
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    ports:
+      - "9835:9835"
+    volumes:
+      - /usr/bin/nvidia-smi:/usr/bin/nvidia-smi  # mount host nvidia-smi
+    restart: unless-stopped
     networks:
       - ai-network
 networks:

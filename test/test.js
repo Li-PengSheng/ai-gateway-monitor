@@ -98,3 +98,5 @@ function testModel() {
 
   if (!ok) modelErrors.add(1);
 }
+
+//docker run --rm -i --network host grafana/k6 run - < test.js
