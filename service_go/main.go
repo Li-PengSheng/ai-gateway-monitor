@@ -13,10 +13,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/keepalive"
 
-	_ "net/http/pprof"
-	// --- OpenTelemetry tracing ---
+	_ "net/http/pprof" //
+	// --- 链路追踪相关核心依赖 ---
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
@@ -24,14 +23,15 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 
-	irisv1 "my-go-gateway/gen/iris/v1"
+	// 拦截器与插件
+	irisv1  "my-go-gateway/gen/iris/v1"
 	modelv1 "my-go-gateway/gen/model/v1"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 )
 
 var (
-	// Total HTTP requests (used to calculate QPS)
+	// 记录请求总数 (用于计算 QPS)
 	httpRequestsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "http_requests_total",
@@ -39,7 +39,7 @@ var (
 		},
 		[]string{"path", "status"},
 	)
-	// Request latency histogram (used to calculate P99 latency)
+	// 记录请求耗时 (用于计算 P99 延迟)
 	httpDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "http_request_duration_seconds",
@@ -50,16 +50,16 @@ var (
 	)
 
 	grpcRequestDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
+        prometheus.HistogramOpts{
 			Name:    "grpc_request_duration_seconds",
-			Help:    "Histogram of gRPC request duration.",
-			Buckets: prometheus.DefBuckets,
-		},
-		[]string{"method", "status"},
-	)
+			Help:    "Histogram of gRPC request duration.", // ← add this
+			Buckets: prometheus.DefBuckets,  
+        },
+        []string{"method", "status"},
+    )
 
-	// AI model metrics
-	// Total tokens generated (used to calculate throughput TPS)
+	// === 新增：大模型专属指标 ===
+	// 记录生成的总 Token 数 (用于计算吞吐量 TPS)
 	aiTokensTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "ai_generated_tokens_total",
@@ -67,26 +67,28 @@ var (
 		},
 		[]string{"model"},
 	)
-	// Pure inference latency for the LLM
+	// 记录大模型的纯推理耗时
 	aiGenerationDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "ai_generation_duration_seconds",
 			Help:    "Histogram of AI model purely generation duration.",
-			Buckets: []float64{.5, 1, 2, 5, 10, 20, 30, 60},
+			// 针对大模型生成，桶的范围要设置得大一些 (0.5秒 到 60秒)
+			Buckets: []float64{.5, 1, 2, 5, 10, 20, 30, 60}, 
 		},
 		[]string{"model"},
 	)
+
 )
 
 func init() {
-	prometheus.MustRegister(httpRequestsTotal)
-	prometheus.MustRegister(httpDuration)
-	prometheus.MustRegister(grpcRequestDuration)
-	prometheus.MustRegister(aiTokensTotal)
-	prometheus.MustRegister(aiGenerationDuration)
+    prometheus.MustRegister(httpRequestsTotal)
+    prometheus.MustRegister(httpDuration)
+    prometheus.MustRegister(grpcRequestDuration)
+    prometheus.MustRegister(aiTokensTotal)
+    prometheus.MustRegister(aiGenerationDuration)
 }
 
-// initTracer initialises the OpenTelemetry tracer and connects to Jaeger.
+// 初始化 OpenTelemetry 追踪器
 func initTracer() (*sdktrace.TracerProvider, error) {
 	ctx := context.Background()
 
@@ -95,6 +97,7 @@ func initTracer() (*sdktrace.TracerProvider, error) {
 		jaegerEndpoint = "localhost:4317" // local dev fallback
 	}
 
+	// 连接到 Docker Compose 中的 Jaeger 服务
 	exporter, err := otlptracegrpc.New(ctx,
 		otlptracegrpc.WithEndpoint(jaegerEndpoint),
 		otlptracegrpc.WithInsecure(),
@@ -112,7 +115,7 @@ func initTracer() (*sdktrace.TracerProvider, error) {
 	)
 
 	otel.SetTracerProvider(tp)
-	// W3C TraceContext propagation so otelgrpc can forward trace IDs downstream.
+	// 关键：设置全局传播器，这样 otelgrpc 才能把 ID 传出去
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	return tp, nil
 }
@@ -120,13 +123,14 @@ func initTracer() (*sdktrace.TracerProvider, error) {
 func main() {
 
 	go func() {
+		// 建议使用独立端口，避免干扰业务逻辑
 		slog.Info("pprof running on http://localhost:6060/debug/pprof")
 		if err := http.ListenAndServe(":6060", nil); err != nil {
 			slog.Error("pprof failed", "error", err)
 		}
 	}()
 
-	// 1. Initialise distributed tracing
+	// 1. 初始化链路追踪
 	tp, err := initTracer()
 	if err != nil {
 		slog.Error("failed to initialize tracer", "error", err)
@@ -142,11 +146,21 @@ func main() {
 		addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                10 * time.Second,
-			Timeout:             3 * time.Second,
-			PermitWithoutStream: true,
+/* 		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff: backoff.Config{
+				BaseDelay: 100 * time.Millisecond,
+				MaxDelay:  10 * time.Second,
+			},
+			MinConnectTimeout: 30 * time.Second,
 		}),
+			// ✅ 改进：连接复用和健康检查
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(50*1024*1024),  // 增大接收缓冲
+		),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:    10 * time.Second,
+			Timeout: 3 * time.Second,
+		}) */
 	)
 	if err != nil {
 		slog.Error("failed to connect to AI service", "error", err)
@@ -157,28 +171,23 @@ func main() {
 	irisClient := irisv1.NewIrisPredictorClient(conn)
 	modelClient := modelv1.NewModelPredictorClient(conn)
 
-	// Object pool: reuse proto request structs to reduce GC pressure.
+	// 1. 定义全局对象池
 	var predictReqPool = sync.Pool{
 		New: func() interface{} {
-			return new(irisv1.IrisPredictRequest)
+			return new(irisv1.IrisPredictRequest) // 篮子空了才创建新的
 		},
 	}
 
 	r := gin.Default()
 
-	// Health check used by Kubernetes liveness and readiness probes.
-	r.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
-
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
-	// Iris flower classification
+	//iris
 	r.POST("/predict/iris", func(c *gin.Context) {
 		timer := prometheus.NewTimer(httpDuration.WithLabelValues("/predict/iris"))
 		defer timer.ObserveDuration()
 
-		// Bind into a plain struct first — proto structs don't have json tags.
+		// ✓ bind into a plain struct first — proto structs don't have json tags
 		var body struct {
 			SepalLength float32 `json:"sepal_length"`
 			SepalWidth  float32 `json:"sepal_width"`
@@ -190,29 +199,31 @@ func main() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-
+		// ✓ correct type assertion
 		req := predictReqPool.Get().(*irisv1.IrisPredictRequest)
 		defer func() {
 			req.Reset()
 			predictReqPool.Put(req)
 		}()
 
+		// copy fields from plain struct into proto request
 		req.SepalLength = body.SepalLength
-		req.SepalWidth = body.SepalWidth
+		req.SepalWidth  = body.SepalWidth
 		req.PetalLength = body.PetalLength
-		req.PetalWidth = body.PetalWidth
+		req.PetalWidth  = body.PetalWidth
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 		defer cancel()
 
 		grpcStart := time.Now()
+		// ✓ irisClient, not client
 		resp, err := irisClient.IrisPredict(ctx, req)
 		grpcStatus := "ok"
 		if err != nil {
 			grpcStatus = "error"
 		}
 		grpcRequestDuration.WithLabelValues("IrisPredict", grpcStatus).Observe(time.Since(grpcStart).Seconds())
-
+		
 		if err != nil {
 			httpRequestsTotal.WithLabelValues("/predict/iris", "500").Inc()
 			slog.Error("iris service call failed", "error", err)
@@ -226,10 +237,12 @@ func main() {
 			"id":     resp.ClassId,
 			"source": "Go Gateway -> Python AI (Iris)",
 		})
+
 	})
 
-	// LLM inference via Ollama (qwen2.5)
+	//models qwen
 	r.POST("/predict/model", func(c *gin.Context) {
+
 		timer := prometheus.NewTimer(httpDuration.WithLabelValues("/predict/model"))
 		defer timer.ObserveDuration()
 
@@ -245,6 +258,7 @@ func main() {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 		defer cancel()
 
+		// ✅ Add this — time the gRPC call
 		grpcStart := time.Now()
 		resp, err := modelClient.ModelPredict(ctx, &modelv1.ModelPredictRequest{
 			Prompt: reqJson.Prompt,
@@ -254,7 +268,7 @@ func main() {
 			grpcStatus = "error"
 		}
 		grpcRequestDuration.WithLabelValues("ModelPredict", grpcStatus).
-			Observe(time.Since(grpcStart).Seconds())
+        Observe(time.Since(grpcStart).Seconds())
 
 		if err != nil {
 			httpRequestsTotal.WithLabelValues("/predict/model", "500").Inc()
@@ -263,18 +277,21 @@ func main() {
 			return
 		}
 
-		// Record AI-specific metrics.
+		// === 新增：记录大模型专属指标 ===
 		if resp.EvalCount > 0 {
+			// 累加生成的 Token 数
 			aiTokensTotal.WithLabelValues(resp.ModelName).Add(float64(resp.EvalCount))
-			// Ollama eval_duration is in nanoseconds; convert to seconds.
+			
+			// Ollama 的 eval_duration 单位通常是纳秒，转换为秒
 			durationSec := float64(resp.EvalDuration) / 1e9
 			aiGenerationDuration.WithLabelValues(resp.ModelName).Observe(durationSec)
 		}
 
 		httpRequestsTotal.WithLabelValues("/predict/model", "200").Inc()
 		c.JSON(http.StatusOK, gin.H{
-			"reply": resp.Response,
-			"model": resp.ModelName,
+			"reply":  resp.Response,
+			"model":  resp.ModelName,
+			// 可选：把指标也返回给前端展示
 			"metrics": gin.H{
 				"prompt_tokens": resp.PromptEvalCount,
 				"output_tokens": resp.EvalCount,
@@ -287,3 +304,5 @@ func main() {
 	slog.Info("Go Gateway running on http://localhost:8080")
 	r.Run(":8080")
 }
+
+//go get go.opentelemetry.io/otel go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc
