@@ -6,8 +6,15 @@ services:
     build: ./service_python
     environment:
     - OLLAMA_HOST=http://172.18.0.1:11434
+    - JAEGER_ENDPOINT=jaeger:4317
     networks:
       - ai-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; ch = grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
   # Go API 网关
   go-gateway:
@@ -16,11 +23,20 @@ services:
       - "8080:8080" # 将容器的 8080 映射到宿主机的 8080
       - "6060:6060"
     depends_on:
-      - python-ai
+      python-ai:
+        condition: service_healthy
     environment:
       - AI_SERVICE_ADDR=python-ai:50051 # 关键：通过服务名通信
+      - JAEGER_ENDPOINT=jaeger:4317
     networks:
       - ai-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   # 新增：Prometheus 时序数据库
   prometheus:
     image: prom/prometheus:latest
@@ -28,6 +44,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
     networks:
       - ai-network
     ports:
@@ -42,6 +59,9 @@ services:
       - ai-network
     depends_on:
       - prometheus
+    volumes:
+      - grafana_data:/var/lib/grafana
+
   # 新增：Jaeger 追踪中心
   jaeger:
     image: jaegertracing/all-in-one:latest
@@ -63,6 +83,11 @@ services:
     restart: unless-stopped
     networks:
       - ai-network
+
 networks:
   ai-network:
     driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:

@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 
 	_ "net/http/pprof" //
 	// --- 链路追踪相关核心依赖 ---
@@ -146,21 +149,14 @@ func main() {
 		addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
-/* 		grpc.WithConnectParams(grpc.ConnectParams{
-			Backoff: backoff.Config{
-				BaseDelay: 100 * time.Millisecond,
-				MaxDelay:  10 * time.Second,
-			},
-			MinConnectTimeout: 30 * time.Second,
-		}),
-			// ✅ 改进：连接复用和健康检查
 		grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(50*1024*1024),  // 增大接收缓冲
+			grpc.MaxCallRecvMsgSize(50*1024*1024), // 增大接收缓冲至 50 MB
 		),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:    10 * time.Second,
-			Timeout: 3 * time.Second,
-		}) */
+			Time:                10 * time.Second, // 每 10s 发一次 ping
+			Timeout:             3 * time.Second,  // ping 超时
+			PermitWithoutStream: true,             // 空闲时也保活
+		}),
 	)
 	if err != nil {
 		slog.Error("failed to connect to AI service", "error", err)
@@ -181,6 +177,11 @@ func main() {
 	r := gin.Default()
 
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
+	// 健康检查端点，供 K8s readiness/liveness 探针使用
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
 
 	//iris
 	r.POST("/predict/iris", func(c *gin.Context) {
@@ -254,6 +255,11 @@ func main() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if len(reqJson.Prompt) > 2000 {
+			httpRequestsTotal.WithLabelValues("/predict/model", "400").Inc()
+			c.JSON(http.StatusBadRequest, gin.H{"error": "prompt exceeds maximum length of 2000 characters"})
+			return
+		}
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 		defer cancel()
@@ -302,7 +308,30 @@ func main() {
 	})
 
 	slog.Info("Go Gateway running on http://localhost:8080")
-	r.Run(":8080")
-}
 
-//go get go.opentelemetry.io/otel go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: r,
+	}
+
+	// 在独立 goroutine 中启动 HTTP 服务器
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("HTTP server error", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	// 等待终止信号（SIGTERM/SIGINT），实现优雅关闭
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	slog.Info("Shutting down server gracefully...")
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("Server forced to shutdown", "error", err)
+	}
+	slog.Info("Server stopped.")
+}
