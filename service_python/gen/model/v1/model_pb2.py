@@ -4,38 +4,37 @@
 # source: model/v1/model.proto
 # Protobuf Python Version: 6.33.5
 """Generated protocol buffer code."""
+
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import descriptor_pool as _descriptor_pool
 from google.protobuf import runtime_version as _runtime_version
 from google.protobuf import symbol_database as _symbol_database
 from google.protobuf.internal import builder as _builder
+
 _runtime_version.ValidateProtobufRuntimeVersion(
-    _runtime_version.Domain.PUBLIC,
-    6,
-    33,
-    5,
-    '',
-    'model/v1/model.proto'
+    _runtime_version.Domain.PUBLIC, 6, 33, 5, "", "model/v1/model.proto"
 )
 # @@protoc_insertion_point(imports)
 
 _sym_db = _symbol_database.Default()
 
 
-
-
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x14model/v1/model.proto\x12\x08model.v1\"-\n\x13ModelPredictRequest\x12\x16\n\x06prompt\x18\x01 \x01(\tR\x06prompt\"\xc1\x01\n\x14ModelPredictResponse\x12\x1a\n\x08response\x18\x01 \x01(\tR\x08response\x12\x1d\n\nmodel_name\x18\x02 \x01(\tR\tmodelName\x12*\n\x11prompt_eval_count\x18\x03 \x01(\x05R\x0fpromptEvalCount\x12\x1d\n\neval_count\x18\x04 \x01(\x05R\tevalCount\x12#\n\reval_duration\x18\x05 \x01(\x03R\x0c\x65valDuration2_\n\x0eModelPredictor\x12M\n\x0cModelPredict\x12\x1d.model.v1.ModelPredictRequest\x1a\x1e.model.v1.ModelPredictResponseB\x97\x01\n\x0c\x63om.model.v1B\nModelProtoP\x01Z:ai-microservice-demo/service_go/gen/proto/model/v1;modelv1\xa2\x02\x03MXX\xaa\x02\x08Model.V1\xca\x02\x08Model\\V1\xe2\x02\x14Model\\V1\\GPBMetadata\xea\x02\tModel::V1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
+    b'\n\x14model/v1/model.proto\x12\x08model.v1"-\n\x13ModelPredictRequest\x12\x16\n\x06prompt\x18\x01 \x01(\tR\x06prompt"\xc1\x01\n\x14ModelPredictResponse\x12\x1a\n\x08response\x18\x01 \x01(\tR\x08response\x12\x1d\n\nmodel_name\x18\x02 \x01(\tR\tmodelName\x12*\n\x11prompt_eval_count\x18\x03 \x01(\x05R\x0fpromptEvalCount\x12\x1d\n\neval_count\x18\x04 \x01(\x05R\tevalCount\x12#\n\reval_duration\x18\x05 \x01(\x03R\x0c\x65valDuration2_\n\x0eModelPredictor\x12M\n\x0cModelPredict\x12\x1d.model.v1.ModelPredictRequest\x1a\x1e.model.v1.ModelPredictResponseB\x97\x01\n\x0c\x63om.model.v1B\nModelProtoP\x01Z:ai-microservice-demo/service_go/gen/proto/model/v1;modelv1\xa2\x02\x03MXX\xaa\x02\x08Model.V1\xca\x02\x08Model\\V1\xe2\x02\x14Model\\V1\\GPBMetadata\xea\x02\tModel::V1b\x06proto3'
+)
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
-_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'model.v1.model_pb2', _globals)
+_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, "model.v1.model_pb2", _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
-  _globals['DESCRIPTOR']._loaded_options = None
-  _globals['DESCRIPTOR']._serialized_options = b'\n\014com.model.v1B\nModelProtoP\001Z:ai-microservice-demo/service_go/gen/proto/model/v1;modelv1\242\002\003MXX\252\002\010Model.V1\312\002\010Model\\V1\342\002\024Model\\V1\\GPBMetadata\352\002\tModel::V1'
-  _globals['_MODELPREDICTREQUEST']._serialized_start=34
-  _globals['_MODELPREDICTREQUEST']._serialized_end=79
-  _globals['_MODELPREDICTRESPONSE']._serialized_start=82
-  _globals['_MODELPREDICTRESPONSE']._serialized_end=275
-  _globals['_MODELPREDICTOR']._serialized_start=277
-  _globals['_MODELPREDICTOR']._serialized_end=372
+    _globals["DESCRIPTOR"]._loaded_options = None
+    _globals[
+        "DESCRIPTOR"
+    ]._serialized_options = b"\n\014com.model.v1B\nModelProtoP\001Z:ai-microservice-demo/service_go/gen/proto/model/v1;modelv1\242\002\003MXX\252\002\010Model.V1\312\002\010Model\\V1\342\002\024Model\\V1\\GPBMetadata\352\002\tModel::V1"
+    _globals["_MODELPREDICTREQUEST"]._serialized_start = 34
+    _globals["_MODELPREDICTREQUEST"]._serialized_end = 79
+    _globals["_MODELPREDICTRESPONSE"]._serialized_start = 82
+    _globals["_MODELPREDICTRESPONSE"]._serialized_end = 275
+    _globals["_MODELPREDICTOR"]._serialized_start = 277
+    _globals["_MODELPREDICTOR"]._serialized_end = 372
 # @@protoc_insertion_point(module_scope)

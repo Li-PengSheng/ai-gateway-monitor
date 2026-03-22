@@ -4,38 +4,37 @@
 # source: iris/v1/iris.proto
 # Protobuf Python Version: 6.33.5
 """Generated protocol buffer code."""
+
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import descriptor_pool as _descriptor_pool
 from google.protobuf import runtime_version as _runtime_version
 from google.protobuf import symbol_database as _symbol_database
 from google.protobuf.internal import builder as _builder
+
 _runtime_version.ValidateProtobufRuntimeVersion(
-    _runtime_version.Domain.PUBLIC,
-    6,
-    33,
-    5,
-    '',
-    'iris/v1/iris.proto'
+    _runtime_version.Domain.PUBLIC, 6, 33, 5, "", "iris/v1/iris.proto"
 )
 # @@protoc_insertion_point(imports)
 
 _sym_db = _symbol_database.Default()
 
 
-
-
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12iris/v1/iris.proto\x12\x07iris.v1\"\x9c\x01\n\x12IrisPredictRequest\x12!\n\x0csepal_length\x18\x01 \x01(\x02R\x0bsepalLength\x12\x1f\n\x0bsepal_width\x18\x02 \x01(\x02R\nsepalWidth\x12!\n\x0cpetal_length\x18\x03 \x01(\x02R\x0bpetalLength\x12\x1f\n\x0bpetal_width\x18\x04 \x01(\x02R\npetalWidth\"O\n\x13IrisPredictResponse\x12\x19\n\x08\x63lass_id\x18\x01 \x01(\x05R\x07\x63lassId\x12\x1d\n\nclass_name\x18\x02 \x01(\tR\tclassName2Y\n\rIrisPredictor\x12H\n\x0bIrisPredict\x12\x1b.iris.v1.IrisPredictRequest\x1a\x1c.iris.v1.IrisPredictResponseB\x8f\x01\n\x0b\x63om.iris.v1B\tIrisProtoP\x01Z8ai-microservice-demo/service_go/gen/proto/iris/v1;irisv1\xa2\x02\x03IXX\xaa\x02\x07Iris.V1\xca\x02\x07Iris\\V1\xe2\x02\x13Iris\\V1\\GPBMetadata\xea\x02\x08Iris::V1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
+    b'\n\x12iris/v1/iris.proto\x12\x07iris.v1"\x9c\x01\n\x12IrisPredictRequest\x12!\n\x0csepal_length\x18\x01 \x01(\x02R\x0bsepalLength\x12\x1f\n\x0bsepal_width\x18\x02 \x01(\x02R\nsepalWidth\x12!\n\x0cpetal_length\x18\x03 \x01(\x02R\x0bpetalLength\x12\x1f\n\x0bpetal_width\x18\x04 \x01(\x02R\npetalWidth"O\n\x13IrisPredictResponse\x12\x19\n\x08\x63lass_id\x18\x01 \x01(\x05R\x07\x63lassId\x12\x1d\n\nclass_name\x18\x02 \x01(\tR\tclassName2Y\n\rIrisPredictor\x12H\n\x0bIrisPredict\x12\x1b.iris.v1.IrisPredictRequest\x1a\x1c.iris.v1.IrisPredictResponseB\x8f\x01\n\x0b\x63om.iris.v1B\tIrisProtoP\x01Z8ai-microservice-demo/service_go/gen/proto/iris/v1;irisv1\xa2\x02\x03IXX\xaa\x02\x07Iris.V1\xca\x02\x07Iris\\V1\xe2\x02\x13Iris\\V1\\GPBMetadata\xea\x02\x08Iris::V1b\x06proto3'
+)
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
-_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'iris.v1.iris_pb2', _globals)
+_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, "iris.v1.iris_pb2", _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
-  _globals['DESCRIPTOR']._loaded_options = None
-  _globals['DESCRIPTOR']._serialized_options = b'\n\013com.iris.v1B\tIrisProtoP\001Z8ai-microservice-demo/service_go/gen/proto/iris/v1;irisv1\242\002\003IXX\252\002\007Iris.V1\312\002\007Iris\\V1\342\002\023Iris\\V1\\GPBMetadata\352\002\010Iris::V1'
-  _globals['_IRISPREDICTREQUEST']._serialized_start=32
-  _globals['_IRISPREDICTREQUEST']._serialized_end=188
-  _globals['_IRISPREDICTRESPONSE']._serialized_start=190
-  _globals['_IRISPREDICTRESPONSE']._serialized_end=269
-  _globals['_IRISPREDICTOR']._serialized_start=271
-  _globals['_IRISPREDICTOR']._serialized_end=360
+    _globals["DESCRIPTOR"]._loaded_options = None
+    _globals[
+        "DESCRIPTOR"
+    ]._serialized_options = b"\n\013com.iris.v1B\tIrisProtoP\001Z8ai-microservice-demo/service_go/gen/proto/iris/v1;irisv1\242\002\003IXX\252\002\007Iris.V1\312\002\007Iris\\V1\342\002\023Iris\\V1\\GPBMetadata\352\002\010Iris::V1"
+    _globals["_IRISPREDICTREQUEST"]._serialized_start = 32
+    _globals["_IRISPREDICTREQUEST"]._serialized_end = 188
+    _globals["_IRISPREDICTRESPONSE"]._serialized_start = 190
+    _globals["_IRISPREDICTRESPONSE"]._serialized_end = 269
+    _globals["_IRISPREDICTOR"]._serialized_start = 271
+    _globals["_IRISPREDICTOR"]._serialized_end = 360
 # @@protoc_insertion_point(module_scope)

@@ -1,4 +1,4 @@
-""" import logging
+"""import logging
 import os
 import signal
 import sys
@@ -122,7 +122,7 @@ class ModelPredictor(model_pb2_grpc.ModelPredictorServicer):
             prompt_eval_count=response.prompt_eval_count or 0,
             eval_count=response.eval_count or 0,
             eval_duration=response.eval_duration or 0,
-        ) 
+        )
 
 
 def serve():
@@ -150,7 +150,7 @@ def serve():
 
 if __name__ == "__main__":
     serve()
- """
+"""
 
 import os
 import sys

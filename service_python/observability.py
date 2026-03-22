@@ -1,5 +1,5 @@
 # service_python/observability.py
-""" def setup_logging():
+"""def setup_logging():
     # 配置结构化日志
     logging.basicConfig(
         level=logging.INFO,
@@ -25,7 +25,7 @@ def setup_tracing():
 
     # 2. 自动拦截所有 gRPC 请求
     instrumentor = GrpcInstrumentorServer()
-    instrumentor.instrument() """
+    instrumentor.instrument()"""
 
 import logging
 import os

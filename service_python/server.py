@@ -1,5 +1,5 @@
 # service_python/server.py
-""" def create_server(iris_predictor, model_predictor):
+"""def create_server(iris_predictor, model_predictor):
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     iris_pb2_grpc.add_IrisPredictorServicer_to_server(iris_predictor, server)
     model_pb2_grpc.add_ModelPredictorServicer_to_server(model_predictor, server)
@@ -13,8 +13,7 @@ def setup_graceful_shutdown(server):
         server.stop(grace=5)
         logger.info("Server stopped.")
     signal.signal(signal.SIGTERM, _shutdown)
-    signal.signal(signal.SIGINT, _shutdown) """
-
+    signal.signal(signal.SIGINT, _shutdown)"""
 
 import logging
 import signal
