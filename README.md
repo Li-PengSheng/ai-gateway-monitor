@@ -1,6 +1,6 @@
 # AI Microservice Demo
 
-A production-style AI inference platform built as a portfolio project, demonstrating modern microservice patterns: REST-to-gRPC gateway, distributed tracing, Prometheus metrics, and Kubernetes deployment.
+A production-style AI inference platform built as a portfolio project, demonstrating modern microservice patterns: REST-to-gRPC gateway, unary + streaming LLM inference, distributed tracing, Prometheus metrics, and Kubernetes deployment.
 
 ## Architecture
 
@@ -12,7 +12,8 @@ Client (HTTP)
 │  go-gateway  (Gin · port 8080)  │  REST API gateway
 │  • /predict/iris                │  • Prometheus metrics
 │  • /predict/model               │  • OpenTelemetry tracing
-│  • /health  · /metrics          │  • pprof profiling (:6060)
+│  • /predict/model/stream (SSE)  │  • pprof profiling (:6060)
+│  • /health  · /metrics          │
 └────────────┬────────────────────┘
              │ gRPC (port 50051)
              ▼
@@ -25,9 +26,10 @@ Client (HTTP)
              ▼
         Ollama (Qwen2.5:1.5b)      LLM running on host / GPU
 
-Observability stack (docker-compose):
+Observability stack:
   Prometheus :9090  →  Grafana :3000
   Jaeger     :16686 (distributed traces)
+Optional:
   NVIDIA GPU Exporter :9835
 ```
 
@@ -88,6 +90,12 @@ curl -X POST http://localhost:8080/predict/model \
   -d '{"prompt":"Explain machine learning in one sentence."}'
 # → {"metrics":{"duration_sec":...,"output_tokens":...,"prompt_tokens":...},"model":"qwen2.5:1.5b","reply":"...","source":"Go Gateway -> Ollama (Qwen)"}
 
+# LLM streaming inference (Server-Sent Events)
+curl -N -X POST http://localhost:8080/predict/model/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Explain machine learning in one sentence."}'
+# → event: message / data: {...} chunks, then event: done
+
 # Health check
 curl http://localhost:8080/health
 # → {"status":"ok"}
@@ -99,9 +107,15 @@ Environment variables for each service:
 
 | Variable | Service | Default | Description |
 |---|---|---|---|
+| `HTTP_ADDR` | go-gateway | `:8080` | Go gateway HTTP listen address |
+| `PPROF_ADDR` | go-gateway | `:6060` | Go pprof listen address |
 | `AI_SERVICE_ADDR` | go-gateway | `localhost:50051` | Python gRPC backend address |
+| `JAEGER_ENDPOINT` | go-gateway/python-ai | `localhost:4317` | OTLP endpoint for tracing export |
 | `OLLAMA_HOST` | python-ai | `http://localhost:11434` | Ollama API base URL |
 | `MODEL_NAME` | python-ai | `qwen2.5:1.5b` | Ollama model to serve |
+| `IRIS_MODEL_PATH` | python-ai | _(unset)_ | Optional path to a pre-trained Iris model |
+
+> In Docker Compose, these defaults are overridden where needed (for example `AI_SERVICE_ADDR=python-ai:50051`).
 
 ## Load Testing
 
@@ -131,8 +145,13 @@ docker run --rm -i --network host grafana/k6 run - < test/test.js
 ## Kubernetes Deployment
 
 ```bash
-# Build images and deploy to local K8s (e.g. Minikube / Docker Desktop)
-./deploy.sh up
+# Full local workflow (patch config, build images, apply manifests, start monitoring)
+./deploy.sh
+
+# Or run steps separately
+./deploy.sh build
+./deploy.sh apply
+./deploy.sh monitor
 
 # Tail logs
 ./deploy.sh logs
@@ -164,6 +183,16 @@ The K8s setup includes:
 
 Both services instrument all requests with OpenTelemetry, propagating trace context via gRPC metadata. View full request traces at http://localhost:16686.
 
+### Optional GPU Metrics Exporter
+
+You can start the Python GPU exporter separately (outside Docker Compose):
+
+```bash
+./deploy.sh gpu
+```
+
+It exposes metrics at `http://localhost:9835/metrics`.
+
 ### Profiling (pprof)
 
 Go gateway exposes runtime profiling at http://localhost:6060/debug/pprof — useful for CPU and memory analysis under load.
@@ -179,11 +208,17 @@ Go gateway exposes runtime profiling at http://localhost:6060/debug/pprof — us
 │   ├── main.go
 │   ├── Dockerfile
 │   ├── go.mod
+│   ├── handlers/           # HTTP handlers (iris/model/stream)
+│   ├── router/             # Route wiring
+│   ├── config/             # Env config
 │   └── gen/                # Generated gRPC stubs
 ├── service_python/         # Python AI service
 │   ├── main.py
 │   ├── Dockerfile
 │   ├── pyproject.toml
+│   ├── models/             # Iris + Ollama predictors
+│   ├── observability.py    # Logging + tracing setup
+│   ├── server.py           # gRPC server wiring
 │   └── gen/                # Generated gRPC stubs
 ├── test/
 │   └── test.js             # k6 load test
