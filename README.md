@@ -60,8 +60,8 @@ Optional:
 
 ```bash
 # Clone and start all services
-git clone https://github.com/Li-PengSheng/ai-microservice-demo.git
-cd ai-microservice-demo
+git clone https://github.com/Li-PengSheng/ai-gateway-monitor.git
+cd ai-gateway-monitor
 docker compose up --build
 ```
 
@@ -123,6 +123,7 @@ Uses [k6](https://k6.io/) to simulate mixed traffic across both endpoints.
 
 ```bash
 # Run load test (requires Docker)
+cd test
 docker run --rm -i --network host grafana/k6 run - < test/test.js
 ```
 
