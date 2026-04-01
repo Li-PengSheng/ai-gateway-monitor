@@ -123,9 +123,14 @@ Uses [k6](https://k6.io/) to simulate mixed traffic across both endpoints.
 
 ```bash
 # Run load test (requires Docker)
-cd test
 docker run --rm -i --network host grafana/k6 run - < test/test.js
 ```
+
+Under k6 load test (30 VUs): peak QPS ~15 req/s, GPU utilization up to 80%, VRAM ~2.5 GB, Go gateway RSS only ~36 MiB
+
+![AI Dashboard Overview](assets/project-ai-gateway-screenshot1.png)
+
+![GPU and Go Runtime Metrics](assets/project-ai-gateway-screenshot2.png)
 
 **Load profile:**
 
@@ -148,6 +153,7 @@ docker run --rm -i --network host grafana/k6 run - < test/test.js
 ```bash
 # Full local workflow (patch config, build images, apply manifests, start monitoring)
 ./deploy.sh
+./deploy.sh forward # export the ports !!
 
 # Or run steps separately
 ./deploy.sh build
