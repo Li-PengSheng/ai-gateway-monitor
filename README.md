@@ -35,16 +35,16 @@ Optional:
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| API Gateway | Go 1.25 · Gin · gRPC client |
-| ML Service | Python 3.12 · scikit-learn · Ollama |
-| Communication | Protocol Buffers v3 · gRPC |
-| Observability | Prometheus · Grafana · Jaeger (OpenTelemetry) |
-| Container | Docker · Docker Compose |
-| Orchestration | Kubernetes · HPA · ServiceMonitor |
-| Load Testing | k6 |
-| Code Gen | Buf |
+| Layer          | Technology                                          |
+|----------------|-----------------------------------------------------|
+| API Gateway    | Go 1.25 · Gin · gRPC client                        |
+| ML Service     | Python 3.12 · scikit-learn · Ollama                |
+| Communication  | Protocol Buffers v3 · gRPC                          |
+| Observability  | Prometheus · Grafana · Jaeger (OpenTelemetry)       |
+| Container      | Docker · Docker Compose                             |
+| Orchestration  | Kubernetes · HPA · ServiceMonitor                   |
+| Load Testing   | k6                                                  |
+| Code Gen       | Buf                                                 |
 
 ## Quick Start
 
@@ -67,13 +67,13 @@ docker compose up --build
 
 Services will be available at:
 
-| Service | URL |
-|---|---|
-| API Gateway | http://localhost:8080 |
-| Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3000 (admin/admin) |
-| Jaeger UI | http://localhost:16686 |
-| pprof | http://localhost:6060/debug/pprof |
+| Service     | URL                                          |
+|-------------|----------------------------------------------|
+| API Gateway | http://localhost:8080                        |
+| Prometheus  | http://localhost:9090                        |
+| Grafana     | http://localhost:3000 (admin/admin)          |
+| Jaeger UI   | http://localhost:16686                       |
+| pprof       | http://localhost:6060/debug/pprof            |
 
 ### API Examples
 
@@ -105,15 +105,15 @@ curl http://localhost:8080/health
 
 Environment variables for each service:
 
-| Variable | Service | Default | Description |
-|---|---|---|---|
-| `HTTP_ADDR` | go-gateway | `:8080` | Go gateway HTTP listen address |
-| `PPROF_ADDR` | go-gateway | `:6060` | Go pprof listen address |
-| `AI_SERVICE_ADDR` | go-gateway | `localhost:50051` | Python gRPC backend address |
-| `JAEGER_ENDPOINT` | go-gateway/python-ai | `localhost:4317` | OTLP endpoint for tracing export |
-| `OLLAMA_HOST` | python-ai | `http://localhost:11434` | Ollama API base URL |
-| `MODEL_NAME` | python-ai | `qwen2.5:1.5b` | Ollama model to serve |
-| `IRIS_MODEL_PATH` | python-ai | _(unset)_ | Optional path to a pre-trained Iris model |
+| Variable           | Service              | Default              | Description                              |
+|--------------------|----------------------|----------------------|------------------------------------------|
+| `HTTP_ADDR`        | go-gateway           | `:8080`              | Go gateway HTTP listen address           |
+| `PPROF_ADDR`       | go-gateway           | `:6060`              | Go pprof listen address                  |
+| `AI_SERVICE_ADDR`  | go-gateway           | `localhost:50051`    | Python gRPC backend address              |
+| `JAEGER_ENDPOINT`  | go-gateway/python-ai | `localhost:4317`     | OTLP endpoint for tracing export         |
+| `OLLAMA_HOST`      | python-ai            | `http://localhost:11434` | Ollama API base URL                  |
+| `MODEL_NAME`       | python-ai            | `qwen2.5:1.5b`       | Ollama model to serve                    |
+| `IRIS_MODEL_PATH`  | python-ai            | _(unset)_            | Optional path to a pre-trained Iris model |
 
 > In Docker Compose, these defaults are overridden where needed (for example `AI_SERVICE_ADDR=python-ai:50051`).
 
@@ -134,13 +134,13 @@ Under k6 load test (30 VUs): peak QPS ~15 req/s, GPU utilization up to 80%, VRAM
 
 **Load profile:**
 
-| Phase | Duration | VUs |
-|---|---|---|
-| Ramp-up | 15 s | 0 → 10 |
-| Steady state | 30 s | 10 |
-| Spike | 15 s | 10 → 30 |
-| Hold spike | 30 s | 30 |
-| Ramp-down | 10 s | 30 → 0 |
+| Phase        | Duration | VUs      |
+|--------------|----------|----------|
+| Ramp-up      | 15 s     | 0 → 10   |
+| Steady state | 30 s     | 10       |
+| Spike        | 15 s     | 10 → 30  |
+| Hold spike   | 30 s     | 30       |
+| Ramp-down    | 10 s     | 30 → 0   |
 
 **Thresholds:**
 
@@ -178,13 +178,13 @@ The K8s setup includes:
 
 ### Metrics (Prometheus)
 
-| Metric | Type | Description |
-|---|---|---|
-| `http_requests_total` | Counter | HTTP requests by path and status |
-| `http_request_duration_seconds` | Histogram | HTTP response latency |
-| `grpc_request_duration_seconds` | Histogram | gRPC call duration |
-| `ai_generated_tokens_total` | Counter | LLM output tokens by model |
-| `ai_generation_duration_seconds` | Histogram | LLM generation time |
+| Metric                          | Type      | Description                               |
+|---------------------------------|-----------|-------------------------------------------|
+| `http_requests_total`           | Counter   | HTTP requests by path and status          |
+| `http_request_duration_seconds` | Histogram | HTTP response latency                     |
+| `grpc_request_duration_seconds` | Histogram | gRPC call duration                        |
+| `ai_generated_tokens_total`     | Counter   | LLM output tokens by model                |
+| `ai_generation_duration_seconds`| Histogram | LLM generation time                       |
 
 ### Distributed Tracing (Jaeger)
 
