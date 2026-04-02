@@ -1,7 +1,7 @@
 # version: "3.8"
 
 services:
-  # AI 模型服务
+  # Python AI inference service (gRPC backend)
   python-ai:
     build: ./service_python
     environment:
@@ -16,18 +16,18 @@ services:
       interval: 15s
       timeout: 10s
       retries: 3
-      start_period: 30s  # 给足启动时间
-  # Go API 网关
+      start_period: 30s  # Allow extra time for model loading at startup
+  # Go REST API gateway
   go-gateway:
     build: ./service_go
     ports:
-      - "8080:8080" # 将容器的 8080 映射到宿主机的 8080
-      - "6060:6060"
+      - "8080:8080" # REST API
+      - "6060:6060" # pprof profiling
     depends_on:
       python-ai:
         condition: service_healthy
     environment:
-      - AI_SERVICE_ADDR=python-ai:50051 # 关键：通过服务名通信
+      - AI_SERVICE_ADDR=python-ai:50051 # Resolve python-ai by container name
       - JAEGER_ENDPOINT=jaeger:4317
     networks:
       - ai-network
@@ -37,7 +37,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-  # 新增：Prometheus 时序数据库
+  # Prometheus time-series metrics storage
   prometheus:
     image: prom/prometheus:latest
     extra_hosts:
@@ -49,7 +49,7 @@ services:
     ports:
       - "9090:9090"
 
-  # 新增：Grafana 可视化面板
+  # Grafana visualization dashboard
   grafana:
     image: grafana/grafana:latest
     ports:
@@ -58,12 +58,12 @@ services:
       - ai-network
     depends_on:
       - prometheus
-  # 新增：Jaeger 追踪中心
+  # Jaeger distributed tracing backend
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:
-      - "16686:16686" # UI 界面，从 Windows 浏览器访问
-      - "4317:4317" # OTLP 接收端口（gRPC）
+      - "16686:16686" # Jaeger UI
+      - "4317:4317"   # OTLP gRPC receiver
     networks:
       - ai-network
 

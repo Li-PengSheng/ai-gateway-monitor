@@ -1,5 +1,15 @@
-import subprocess, time, re
-from prometheus_client import start_http_server, Gauge
+"""GPU metrics exporter for Prometheus.
+
+Polls nvidia-smi every 5 seconds and exposes GPU utilization, memory usage,
+and temperature as Prometheus gauges on port 9835.
+
+Run independently of Docker Compose:
+    python gpu_exporter.py
+"""
+import subprocess
+import time
+
+from prometheus_client import Gauge, start_http_server
 
 gpu_util = Gauge("nvidia_gpu_utilization", "GPU utilization %", ["gpu"])
 gpu_mem = Gauge("nvidia_gpu_memory_used_mb", "GPU memory used MB", ["gpu"])
@@ -7,6 +17,7 @@ gpu_temp = Gauge("nvidia_gpu_temperature", "GPU temperature C", ["gpu"])
 
 
 def collect():
+    """Query nvidia-smi and update Prometheus gauges."""
     out = subprocess.check_output(
         [
             "nvidia-smi",
