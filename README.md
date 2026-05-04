@@ -4,6 +4,8 @@ A production-style AI inference platform built as a portfolio project, demonstra
 
 ## Architecture
 
+![Architecture](assets/gateway-architecture.png)
+
 ```
 Client (HTTP)
      │
