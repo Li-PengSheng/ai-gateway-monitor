@@ -1,12 +1,12 @@
 rules:
-  custom:
-    - seriesQuery: '{__name__="http_request_duration_seconds_bucket"}'
-      resources:
-        overrides:
-          kubernetes_namespace: { resource: "namespace" }
-          kubernetes_pod_name: { resource: "pod" }
-      name:
-        # 将之前的 mode: "mapped" 替换为 matches
-        matches: "^http_request_duration_seconds_bucket"
-        as: "p99_latency"
-      metricsQuery: "histogram_quantile(0.99, sum by (le, kubernetes_namespace, kubernetes_pod_name) (rate(http_request_duration_seconds_bucket[1m])))"
+    custom:
+        - seriesQuery: '{__name__="http_request_duration_seconds_bucket"}'
+          resources:
+              overrides:
+                  kubernetes_namespace: { resource: "namespace" }
+                  kubernetes_pod_name: { resource: "pod" }
+          name:
+              # 将 "mapped" 替换为 matches
+              matches: "^http_request_duration_seconds_bucket"
+              as: "p99_latency"
+          metricsQuery: "histogram_quantile(0.99, sum by (le, kubernetes_namespace, kubernetes_pod_name) (rate(http_request_duration_seconds_bucket[1m])))"

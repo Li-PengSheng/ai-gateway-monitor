@@ -1,14 +1,14 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: go-gateway-monitor
-  labels:
-    release: prometheus-kube-prometheus # 必须与 helm install 的名称对应
+    name: go-gateway-monitor
+    labels:
+        release: prometheus-kube-prometheus # 必须与 helm install 的名称对应
 spec:
-  selector:
-    matchLabels:
-      app: go-gateway # 对应你之前定义的 Deployment 标签
-  endpoints:
-    - port: web # 对应 Service 中的端口名称
-      path: /metrics
-      interval: 15s
+    selector:
+        matchLabels:
+            app: go-gateway # 对应之前定义的 Deployment 标签
+    endpoints:
+        - port: web # 对应 Service 中的端口名称
+          path: /metrics
+          interval: 15s

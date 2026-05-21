@@ -12,8 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
 
-	irisv1 "my-go-gateway/gen/iris/v1"
 	"my-go-gateway/config"
+	irisv1 "my-go-gateway/gen/iris/v1"
 	"my-go-gateway/metrics"
 )
 

@@ -1,72 +1,76 @@
-# version: "3.8"
-
 services:
-  # Python AI inference service (gRPC backend)
-  python-ai:
-    build: ./service_python
-    environment:
-    - OLLAMA_HOST=http://host.docker.internal:11434
-    - JAEGER_ENDPOINT=jaeger:4317
-    extra_hosts:
-    - "host.docker.internal:host-gateway"
-    networks:
-      - ai-network
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('localhost',50051),timeout=5)"]
-      interval: 15s
-      timeout: 10s
-      retries: 3
-      start_period: 30s  # Allow extra time for model loading at startup
-  # Go REST API gateway
-  go-gateway:
-    build: ./service_go
-    ports:
-      - "8080:8080" # REST API
-      - "6060:6060" # pprof profiling
-    depends_on:
-      python-ai:
-        condition: service_healthy
-    environment:
-      - AI_SERVICE_ADDR=python-ai:50051 # Resolve python-ai by container name
-      - JAEGER_ENDPOINT=jaeger:4317
-    networks:
-      - ai-network
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-  # Prometheus time-series metrics storage
-  prometheus:
-    image: prom/prometheus:latest
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-    networks:
-      - ai-network
-    ports:
-      - "9090:9090"
+    # Python AI inference service (gRPC backend)
+    python-ai:
+        build: ./service_python
+        environment:
+            - OLLAMA_HOST=http://host.docker.internal:11434
+            - JAEGER_ENDPOINT=jaeger:4317
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        networks:
+            - ai-network
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "python",
+                    "-c",
+                    "import socket; s=socket.create_connection(('localhost',50051),timeout=5)",
+                ]
+            interval: 15s
+            timeout: 10s
+            retries: 3
+            start_period: 30s # Allow extra time for model loading at startup
+    # Go REST API gateway
+    go-gateway:
+        build: ./service_go
+        ports:
+            - "8080:8080" # REST API
+            - "6060:6060" # pprof profiling
+        depends_on:
+            python-ai:
+                condition: service_healthy
+        environment:
+            - AI_SERVICE_ADDR=python-ai:50051 # Resolve python-ai by container name
+            - JAEGER_ENDPOINT=jaeger:4317
+        networks:
+            - ai-network
+        healthcheck:
+            test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 10s
+    # Prometheus time-series metrics storage
+    prometheus:
+        image: prom/prometheus:latest
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        volumes:
+            - ./prometheus.yml:/etc/prometheus/prometheus.yml
+        networks:
+            - ai-network
+        ports:
+            - "9090:9090"
 
-  # Grafana visualization dashboard
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    networks:
-      - ai-network
-    depends_on:
-      - prometheus
-  # Jaeger distributed tracing backend
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    ports:
-      - "16686:16686" # Jaeger UI
-      - "4317:4317"   # OTLP gRPC receiver
-    networks:
-      - ai-network
+    # Grafana visualization dashboard
+    grafana:
+        image: grafana/grafana:latest
+        ports:
+            - "3000:3000"
+        networks:
+            - ai-network
+        depends_on:
+            - prometheus
+    # Jaeger distributed tracing backend
+    jaeger:
+        image: jaegertracing/all-in-one:latest
+        ports:
+            - "16686:16686" # Jaeger UI
+            - "4317:4317" # OTLP gRPC receiver
+        networks:
+            - ai-network
 
 networks:
-  ai-network:
-    driver: bridge
+    ai-network:
+        driver: bridge

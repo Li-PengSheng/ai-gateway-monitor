@@ -8,9 +8,9 @@ import (
 )
 
 type Config struct {
-	HTTPAddr      string
-	PProfAddr     string
-	AIServiceAddr string
+	HTTPAddr       string
+	PProfAddr      string
+	AIServiceAddr  string
 	JaegerEndpoint string
 
 	GRPCKeepAliveTime    time.Duration
@@ -24,10 +24,10 @@ type Config struct {
 
 func Load() *Config {
 	return &Config{
-		HTTPAddr:             getEnv("HTTP_ADDR", ":8080"),
-		PProfAddr:            getEnv("PPROF_ADDR", ":6060"),
-		AIServiceAddr:        getEnv("AI_SERVICE_ADDR", "localhost:50051"),
-		JaegerEndpoint:       getEnv("JAEGER_ENDPOINT", "localhost:4317"),
+		HTTPAddr:       getEnv("HTTP_ADDR", ":8080"),
+		PProfAddr:      getEnv("PPROF_ADDR", ":6060"),
+		AIServiceAddr:  getEnv("AI_SERVICE_ADDR", "localhost:50051"),
+		JaegerEndpoint: getEnv("JAEGER_ENDPOINT", "localhost:4317"),
 
 		GRPCKeepAliveTime:    10 * time.Second,
 		GRPCKeepAliveTimeout: 3 * time.Second,

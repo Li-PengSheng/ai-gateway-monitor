@@ -6,6 +6,7 @@ and temperature as Prometheus gauges on port 9835.
 Run independently of Docker Compose:
     python gpu_exporter.py
 """
+
 import subprocess
 import time
 
