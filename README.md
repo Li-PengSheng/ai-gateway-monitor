@@ -144,11 +144,13 @@ Under k6 load test (30 VUs): peak QPS ~15 req/s, GPU utilization up to 80%, VRAM
 | Hold spike   | 30 s     | 30       |
 | Ramp-down    | 10 s     | 30 → 0   |
 
-**Thresholds:**
+**Thresholds (all passed):**
 
-- Iris p95 latency < 500 ms
-- Model p95 latency < 30 s
-- HTTP error rate < 1%
+| Metric | Target | Actual |
+|--------|--------|--------|
+| Iris p95 latency | < 500 ms | ✓ |
+| Model p95 latency | < 30 s | ✓ |
+| HTTP error rate | < 1% | ✓ |
 
 ## Kubernetes Deployment
 
