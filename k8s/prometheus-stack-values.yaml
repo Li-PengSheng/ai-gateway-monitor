@@ -1,0 +1,23 @@
+# In-cluster Prometheus (kube-prometheus-stack) for per-pod scraping and HPA.
+# Docker Compose Prometheus (:9090) stays the dev/Grafana data source.
+
+grafana:
+  enabled: false # use docker-compose Grafana on :3000
+
+alertmanager:
+  enabled: false
+
+kubeStateMetrics:
+  enabled: true
+
+nodeExporter:
+  enabled: false # optional for local clusters
+
+prometheus:
+  enabled: true
+  prometheusSpec:
+    retention: 2d
+    scrapeInterval: 15s
+    # Discover ServiceMonitors in any namespace (e.g. default/go-gateway-monitor)
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false

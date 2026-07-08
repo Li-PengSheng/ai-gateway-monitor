@@ -1,12 +1,13 @@
+# Docker Compose Prometheus — dev observability (Grafana dashboards, GPU, port-forward scrape).
+# For HPA per-pod metrics, use the in-cluster Prometheus installed via ./deploy.sh hpa-stack.
 global:
-  scrape_interval: 5s # 每5秒抓取一次数据，观察更实时
+  scrape_interval: 5s
   evaluation_interval: 5s
 
 scrape_configs:
   - job_name: "go-ai-gateway"
     static_configs:
-      - targets: ["172.19.0.1:8080"] # 使用 docker-compose 中的服务名
-  # add this
+      - targets: ["host.docker.internal:8080"] # kubectl port-forward via ./deploy.sh forward
   - job_name: "gpu"
     static_configs:
-      - targets: ["172.17.141.222:9835"]
+      - targets: ["172.17.141.222:9835"] # patched by deploy.sh gpu

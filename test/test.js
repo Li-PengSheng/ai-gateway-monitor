@@ -25,7 +25,8 @@ export const options = {
   },
 };
 
-const BASE = "http://localhost:8080";
+// Override for in-cluster runs: k6 run -e BASE=http://go-gateway-svc ...
+const BASE = __ENV.BASE || "http://localhost:8080";
 
 const IRIS_CASES = [
   { sepal_length: 5.1, sepal_width: 3.5, petal_length: 1.4, petal_width: 0.2 }, // setosa

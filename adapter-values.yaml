@@ -1,12 +1,23 @@
+# prometheus-adapter helm values (release: prometheus-adapter, namespace: monitoring)
+# Maps in-cluster Prometheus histogram → custom.metrics.k8s.io/pods/p99_latency
+
+prometheus:
+  url: http://prometheus-kube-prometheus-prometheus.monitoring.svc
+  port: 9090
+
 rules:
-    custom:
-        - seriesQuery: '{__name__="http_request_duration_seconds_bucket"}'
-          resources:
-              overrides:
-                  kubernetes_namespace: { resource: "namespace" }
-                  kubernetes_pod_name: { resource: "pod" }
-          name:
-              # 将 "mapped" 替换为 matches
-              matches: "^http_request_duration_seconds_bucket"
-              as: "p99_latency"
-          metricsQuery: "histogram_quantile(0.99, sum by (le, kubernetes_namespace, kubernetes_pod_name) (rate(http_request_duration_seconds_bucket[1m])))"
+  custom:
+    - seriesQuery: 'http_request_duration_seconds_bucket{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: { resource: "namespace" }
+          pod: { resource: "pod" }
+      name:
+        matches: "^http_request_duration_seconds_bucket"
+        as: "p99_latency"
+      metricsQuery: >
+        histogram_quantile(0.99,
+          sum by (le, <<.GroupBy>>) (
+            rate(http_request_duration_seconds_bucket{<<.LabelMatchers>>}[1m])
+          )
+        )

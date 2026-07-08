@@ -41,7 +41,8 @@ services:
             timeout: 5s
             retries: 3
             start_period: 10s
-    # Prometheus time-series metrics storage
+    # Docker Prometheus — dev observability (Grafana, GPU, port-forward scrape).
+    # In-cluster Prometheus for HPA: ./deploy.sh hpa-stack
     prometheus:
         image: prom/prometheus:latest
         extra_hosts:

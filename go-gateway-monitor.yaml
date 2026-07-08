@@ -3,12 +3,15 @@ kind: ServiceMonitor
 metadata:
     name: go-gateway-monitor
     labels:
-        release: prometheus-kube-prometheus # 必须与 helm install 的名称对应
+        release: prometheus # must match helm release name in ./deploy.sh hpa-stack
 spec:
+    namespaceSelector:
+        matchNames:
+            - default
     selector:
         matchLabels:
-            app: go-gateway # 对应之前定义的 Deployment 标签
+            app: go-gateway
     endpoints:
-        - port: web # 对应 Service 中的端口名称
+        - port: web
           path: /metrics
           interval: 15s
