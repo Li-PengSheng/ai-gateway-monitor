@@ -41,11 +41,12 @@ step()    { echo -e "\n${CYAN}${BOLD}══ $* ${NC}"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GO_SERVICE_DIR="$SCRIPT_DIR/service_go"
 PYTHON_SERVICE_DIR="$SCRIPT_DIR/service_python"
+K8S_DIR="$SCRIPT_DIR/k8s"
 
 GO_IMAGE="go-gateway:v2"
 PYTHON_IMAGE="python-ai:v2"
 
-# K8s manifests — order matters
+# K8s manifests — order matters (paths relative to k8s/)
 K8S_MANIFESTS=(
   "ollama-svc.yaml"           # ExternalName → WSL Ollama
   "python-ai.yaml"            # python-ai Deployment + Service
@@ -114,7 +115,7 @@ patch_ollama_svc() {
   fi
   info "WSL eth0 IP: $WSL_IP"
   # Patch the ip field in Endpoints
-  sed -i "s|- ip:.*|- ip: $WSL_IP|" "$SCRIPT_DIR/ollama-svc.yaml"
+  sed -i "s|- ip:.*|- ip: $WSL_IP|" "$K8S_DIR/ollama-svc.yaml"
   success "ollama-svc.yaml patched → $WSL_IP"
 }
 
@@ -182,11 +183,11 @@ patch_jaeger_endpoint() {
   info "WSL eth0 IP: $WSL_IP"
 
   # Patch go-gateway.yaml
-  sed -i "s|value: \".*:4317\"|value: \"$WSL_IP:4317\"|" "$SCRIPT_DIR/go-gateway.yaml"
+  sed -i "s|value: \".*:4317\"|value: \"$WSL_IP:4317\"|" "$K8S_DIR/go-gateway.yaml"
   success "go-gateway.yaml Jaeger endpoint patched → $WSL_IP:4317"
 
   # Patch python-ai.yaml
-  sed -i "s|value: \".*:4317\"|value: \"$WSL_IP:4317\"|" "$SCRIPT_DIR/python-ai.yaml"
+  sed -i "s|value: \".*:4317\"|value: \"$WSL_IP:4317\"|" "$K8S_DIR/python-ai.yaml"
   success "python-ai.yaml Jaeger endpoint patched → $WSL_IP:4317"
 }
 
@@ -270,14 +271,14 @@ install_hpa_stack() {
   info "Installing kube-prometheus-stack (release: $PROMETHEUS_RELEASE, ns: $HPA_NAMESPACE) ..."
   helm upgrade --install "$PROMETHEUS_RELEASE" prometheus-community/kube-prometheus-stack \
     -n "$HPA_NAMESPACE" --create-namespace \
-    -f "$SCRIPT_DIR/k8s/prometheus-stack-values.yaml" \
+    -f "$K8S_DIR/prometheus-stack-values.yaml" \
     --wait --timeout 10m
   success "kube-prometheus-stack ready"
 
   info "Installing prometheus-adapter (release: $ADAPTER_RELEASE) ..."
   helm upgrade --install "$ADAPTER_RELEASE" prometheus-community/prometheus-adapter \
     -n "$HPA_NAMESPACE" \
-    -f "$SCRIPT_DIR/adapter-values.yaml" \
+    -f "$K8S_DIR/adapter-values.yaml" \
     --wait --timeout 5m
   success "prometheus-adapter ready"
 
@@ -473,7 +474,7 @@ rollout_restart() {
 apply_manifests() {
   step "Applying K8s manifests"
   for f in "${K8S_MANIFESTS[@]}"; do
-    path="$SCRIPT_DIR/$f"
+    path="$K8S_DIR/$f"
     if [[ -f "$path" ]]; then
       info "Applying $f ..."
       if [[ "$f" == "go-gateway-monitor.yaml" ]]; then
@@ -604,7 +605,7 @@ show_logs() {
 reset_all() {
   step "Deleting all K8s resources"
   for f in "${K8S_MANIFESTS[@]}"; do
-    path="$SCRIPT_DIR/$f"
+    path="$K8S_DIR/$f"
     if [[ -f "$path" ]]; then
       info "Deleting resources in $f ..."
       kubectl delete -f "$path" --ignore-not-found

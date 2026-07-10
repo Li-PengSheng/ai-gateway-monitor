@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -33,15 +34,12 @@ func (h *ModelHandler) Predict(c *gin.Context) {
 		Prompt string `json:"prompt" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		metrics.HTTPRequestsTotal.WithLabelValues("/predict/model", "400").Inc()
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeValidationError(c, "/predict/model", err.Error())
 		return
 	}
 	if len(body.Prompt) > h.cfg.MaxPromptLen {
-		metrics.HTTPRequestsTotal.WithLabelValues("/predict/model", "400").Inc()
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "prompt exceeds maximum length of 2000 characters",
-		})
+		writeValidationError(c, "/predict/model",
+			fmt.Sprintf("prompt exceeds maximum length of %d characters", h.cfg.MaxPromptLen))
 		return
 	}
 
@@ -60,9 +58,8 @@ func (h *ModelHandler) Predict(c *gin.Context) {
 		Observe(time.Since(grpcStart).Seconds())
 
 	if err != nil {
-		metrics.HTTPRequestsTotal.WithLabelValues("/predict/model", "500").Inc()
 		slog.Error("model service call failed", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeGRPCError(c, "/predict/model", err)
 		return
 	}
 
@@ -94,15 +91,12 @@ func (h *ModelHandler) PredictStream(c *gin.Context) {
 		Prompt string `json:"prompt" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		metrics.HTTPRequestsTotal.WithLabelValues("/predict/model/stream", "400").Inc()
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeValidationError(c, "/predict/model/stream", err.Error())
 		return
 	}
 	if len(body.Prompt) > h.cfg.MaxPromptLen {
-		metrics.HTTPRequestsTotal.WithLabelValues("/predict/model/stream", "400").Inc()
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "prompt exceeds maximum length of 2000 characters",
-		})
+		writeValidationError(c, "/predict/model/stream",
+			fmt.Sprintf("prompt exceeds maximum length of %d characters", h.cfg.MaxPromptLen))
 		return
 	}
 
@@ -121,9 +115,8 @@ func (h *ModelHandler) PredictStream(c *gin.Context) {
 	metrics.GRPCRequestDuration.WithLabelValues("ModelPredictStream", grpcStatus).
 		Observe(time.Since(grpcStart).Seconds())
 	if err != nil {
-		metrics.HTTPRequestsTotal.WithLabelValues("/predict/model/stream", "500").Inc()
 		slog.Error("model stream initiation failed", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeGRPCError(c, "/predict/model/stream", err)
 		return
 	}
 
@@ -145,7 +138,11 @@ func (h *ModelHandler) PredictStream(c *gin.Context) {
 		}
 		if err != nil {
 			slog.Error("stream recv error", "error", err)
-			c.SSEvent("error", gin.H{"error": err.Error()})
+			c.SSEvent("error", gin.H{
+				"code":       CodeStreamError,
+				"message":    err.Error(),
+				"request_id": requestID(c),
+			})
 			return false
 		}
 

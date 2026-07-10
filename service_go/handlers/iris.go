@@ -39,15 +39,22 @@ func (h *IrisHandler) Predict(c *gin.Context) {
 	timer := prometheus.NewTimer(metrics.HTTPDuration.WithLabelValues("/predict/iris"))
 	defer timer.ObserveDuration()
 
+	// Pointer fields distinguish "key absent" from "value is 0". binding:"required"
+	// on float32 would reject legitimate zero measurements (e.g. petal_width: 0).
 	var body struct {
-		SepalLength float32 `json:"sepal_length"`
-		SepalWidth  float32 `json:"sepal_width"`
-		PetalLength float32 `json:"petal_length"`
-		PetalWidth  float32 `json:"petal_width"`
+		SepalLength *float32 `json:"sepal_length"`
+		SepalWidth  *float32 `json:"sepal_width"`
+		PetalLength *float32 `json:"petal_length"`
+		PetalWidth  *float32 `json:"petal_width"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		metrics.HTTPRequestsTotal.WithLabelValues("/predict/iris", "400").Inc()
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeValidationError(c, "/predict/iris", err.Error())
+		return
+	}
+	if body.SepalLength == nil || body.SepalWidth == nil ||
+		body.PetalLength == nil || body.PetalWidth == nil {
+		writeValidationError(c, "/predict/iris",
+			"all iris features are required: sepal_length, sepal_width, petal_length, petal_width")
 		return
 	}
 
@@ -57,10 +64,10 @@ func (h *IrisHandler) Predict(c *gin.Context) {
 		h.reqPool.Put(req)
 	}()
 
-	req.SepalLength = body.SepalLength
-	req.SepalWidth = body.SepalWidth
-	req.PetalLength = body.PetalLength
-	req.PetalWidth = body.PetalWidth
+	req.SepalLength = *body.SepalLength
+	req.SepalWidth = *body.SepalWidth
+	req.PetalLength = *body.PetalLength
+	req.PetalWidth = *body.PetalWidth
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), h.cfg.IrisTimeout)
 	defer cancel()
@@ -75,9 +82,8 @@ func (h *IrisHandler) Predict(c *gin.Context) {
 		Observe(time.Since(grpcStart).Seconds())
 
 	if err != nil {
-		metrics.HTTPRequestsTotal.WithLabelValues("/predict/iris", "500").Inc()
 		slog.Error("iris service call failed", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeGRPCError(c, "/predict/iris", err)
 		return
 	}
 

@@ -26,7 +26,9 @@ services:
         build: ./service_go
         ports:
             - "8080:8080" # REST API
-            - "6060:6060" # pprof profiling
+            # pprof (:6060) is disabled by default. To enable, set PPROF_ENABLED=true
+            # and uncomment the line below:
+            # - "6060:6060"
         depends_on:
             python-ai:
                 condition: service_healthy
@@ -36,7 +38,7 @@ services:
         networks:
             - ai-network
         healthcheck:
-            test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+            test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
             interval: 10s
             timeout: 5s
             retries: 3
@@ -44,7 +46,7 @@ services:
     # Docker Prometheus — dev observability (Grafana, GPU, port-forward scrape).
     # In-cluster Prometheus for HPA: ./deploy.sh hpa-stack
     prometheus:
-        image: prom/prometheus:latest
+        image: prom/prometheus:v3.13.0
         extra_hosts:
             - "host.docker.internal:host-gateway"
         volumes:
@@ -56,7 +58,7 @@ services:
 
     # Grafana visualization dashboard
     grafana:
-        image: grafana/grafana:latest
+        image: grafana/grafana:13.1.0
         ports:
             - "3000:3000"
         networks:
@@ -65,7 +67,7 @@ services:
             - prometheus
     # Jaeger distributed tracing backend
     jaeger:
-        image: jaegertracing/all-in-one:latest
+        image: jaegertracing/all-in-one:1.76.0
         ports:
             - "16686:16686" # Jaeger UI
             - "4317:4317" # OTLP gRPC receiver

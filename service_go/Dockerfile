@@ -14,11 +14,14 @@ COPY . .
 RUN go build -o gateway main.go
 
 # 第二阶段：运行
-FROM alpine:latest
+FROM alpine:3.20
 
-WORKDIR /root/
-# 从编译阶段复制二进制文件
-COPY --from=builder /app/gateway .
+RUN addgroup -S gateway && adduser -S gateway -G gateway
+
+WORKDIR /home/gateway
+COPY --from=builder --chown=gateway:gateway /app/gateway .
+
+USER gateway
 
 # 暴露 Gin 的 HTTP 端口
 EXPOSE 8080

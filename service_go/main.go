@@ -7,6 +7,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"my-go-gateway/config"
@@ -22,13 +23,18 @@ import (
 func main() {
 	cfg := config.Load()
 
-	// pprof on a separate port
-	go func() {
-		slog.Info("pprof running", "addr", "http://localhost"+cfg.PProfAddr+"/debug/pprof")
-		if err := http.ListenAndServe(cfg.PProfAddr, nil); err != nil {
-			slog.Error("pprof failed", "error", err)
-		}
-	}()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: parseLogLevel(cfg.LogLevel),
+	})))
+
+	if cfg.PProfEnabled {
+		go func() {
+			slog.Info("pprof running", "addr", "http://localhost"+cfg.PProfAddr+"/debug/pprof")
+			if err := http.ListenAndServe(cfg.PProfAddr, nil); err != nil {
+				slog.Error("pprof failed", "error", err)
+			}
+		}()
+	}
 
 	// Metrics
 	metrics.Register()
@@ -50,14 +56,20 @@ func main() {
 	defer conn.Close()
 
 	// Handlers
-	healthHandler := handlers.NewHealthHandler()
+	healthHandler := handlers.NewHealthHandler(conn)
 	irisHandler := handlers.NewIrisHandler(irisv1.NewIrisPredictorClient(conn), cfg)
 	modelHandler := handlers.NewModelHandler(modelv1.NewModelPredictorClient(conn), cfg)
 
 	// Router
 	r := router.Setup(healthHandler, irisHandler, modelHandler)
 
-	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: r}
+	srv := &http.Server{
+		Addr:         cfg.HTTPAddr,
+		Handler:      r,
+		ReadTimeout:  cfg.HTTPReadTimeout,
+		WriteTimeout: cfg.HTTPWriteTimeout,
+		IdleTimeout:  cfg.HTTPIdleTimeout,
+	}
 
 	go func() {
 		slog.Info("Go Gateway running", "addr", cfg.HTTPAddr)
@@ -78,4 +90,17 @@ func main() {
 		slog.Error("forced shutdown", "error", err)
 	}
 	slog.Info("Server stopped.")
+}
+
+func parseLogLevel(level string) slog.Level {
+	switch strings.ToLower(level) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }

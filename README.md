@@ -14,8 +14,8 @@ Client (HTTP)
 │  go-gateway  (Gin · port 8080)  │  REST API gateway
 │  • /predict/iris                │  • Prometheus metrics
 │  • /predict/model               │  • OpenTelemetry tracing
-│  • /predict/model/stream (SSE)  │  • pprof profiling (:6060)
-│  • /health  · /metrics          │
+│  • /predict/model/stream (SSE)  │  • pprof profiling (:6060, opt-in)
+│  • /healthz · /readyz · /metrics│
 └────────────┬────────────────────┘
              │ gRPC (port 50051)
              ▼
@@ -77,7 +77,6 @@ Services will be available at:
 | Prometheus  | http://localhost:9090                        |
 | Grafana     | http://localhost:3000 (admin/admin)          |
 | Jaeger UI   | http://localhost:16686                       |
-| pprof       | http://localhost:6060/debug/pprof            |
 
 ### API Examples
 
@@ -100,24 +99,41 @@ curl -N -X POST http://localhost:8080/predict/model/stream \
   -d '{"prompt":"Explain machine learning in one sentence."}'
 # → event: message / data: {...} chunks, then event: done
 
-# Health check
-curl http://localhost:8080/health
+# Liveness (process up, no downstream dependency)
+curl http://localhost:8080/healthz
 # → {"status":"ok"}
+
+# Readiness (gRPC backend connection healthy)
+curl http://localhost:8080/readyz
+# → {"status":"ready","grpc_state":"READY"}
 ```
 
 ## Configuration
 
 Environment variables for each service:
 
-| Variable           | Service              | Default              | Description                              |
-|--------------------|----------------------|----------------------|------------------------------------------|
-| `HTTP_ADDR`        | go-gateway           | `:8080`              | Go gateway HTTP listen address           |
-| `PPROF_ADDR`       | go-gateway           | `:6060`              | Go pprof listen address                  |
-| `AI_SERVICE_ADDR`  | go-gateway           | `localhost:50051`    | Python gRPC backend address              |
-| `JAEGER_ENDPOINT`  | go-gateway/python-ai | `localhost:4317`     | OTLP endpoint for tracing export         |
-| `OLLAMA_HOST`      | python-ai            | `http://localhost:11434` | Ollama API base URL                  |
-| `MODEL_NAME`       | python-ai            | `qwen2.5:1.5b`       | Ollama model to serve                    |
-| `IRIS_MODEL_PATH`  | python-ai            | _(unset)_            | Optional path to a pre-trained Iris model |
+| Variable                  | Service              | Default              | Description                                      |
+|---------------------------|----------------------|----------------------|--------------------------------------------------|
+| `HTTP_ADDR`               | go-gateway           | `:8080`              | Go gateway HTTP listen address                   |
+| `PPROF_ADDR`              | go-gateway           | `:6060`              | pprof listen address (when enabled)              |
+| `PPROF_ENABLED`           | go-gateway           | `false`              | Enable Go runtime profiling endpoint             |
+| `AI_SERVICE_ADDR`         | go-gateway           | `localhost:50051`    | Python gRPC backend address                      |
+| `JAEGER_ENDPOINT`         | go-gateway/python-ai | `localhost:4317`     | OTLP endpoint for tracing export                 |
+| `LOG_LEVEL`               | go-gateway           | `info`               | slog log level (`debug`, `info`, `warn`, `error`) |
+| `HTTP_READ_TIMEOUT`       | go-gateway           | `10s`                | HTTP server read timeout                         |
+| `HTTP_WRITE_TIMEOUT`      | go-gateway           | `10s`                | HTTP server write timeout                        |
+| `HTTP_IDLE_TIMEOUT`       | go-gateway           | `60s`                | HTTP server idle timeout                         |
+| `GRPC_KEEP_ALIVE_TIME`    | go-gateway           | `10s`                | gRPC client keepalive ping interval              |
+| `GRPC_KEEP_ALIVE_TIMEOUT` | go-gateway           | `3s`                 | gRPC client keepalive ping timeout               |
+| `GRPC_MAX_RECV_MSG_SIZE`  | go-gateway           | `52428800` (50 MB)   | gRPC max receive message size (bytes)            |
+| `IRIS_TIMEOUT`            | go-gateway           | `3s`                 | Timeout for `/predict/iris` upstream call        |
+| `MODEL_TIMEOUT`           | go-gateway           | `60s`                | Timeout for `/predict/model` upstream calls      |
+| `MAX_PROMPT_LEN`          | go-gateway           | `2000`               | Max prompt length for model endpoints            |
+| `OLLAMA_HOST`             | python-ai            | `http://localhost:11434` | Ollama API base URL                          |
+| `MODEL_NAME`              | python-ai            | `qwen2.5:1.5b`       | Ollama model to serve                            |
+| `IRIS_MODEL_PATH`         | python-ai            | _(unset)_            | Optional path to a pre-trained Iris model        |
+
+See [`.env.example`](.env.example) for a copy-paste template.
 
 > In Docker Compose, these defaults are overridden where needed (for example `AI_SERVICE_ADDR=python-ai:50051`).
 
@@ -236,7 +252,7 @@ prometheus-adapter  ──►  custom.metrics.k8s.io / pods / p99_latency
 HPA (target: 500m = 500ms average)  ──►  Deployment replicas 2 → 10
 ```
 
-`go-gateway-hpa.yaml`:
+`k8s/go-gateway-hpa.yaml`:
 
 ```yaml
 metrics:
@@ -290,13 +306,13 @@ kubectl port-forward -n monitoring svc/prometheus-kube-prometheus-prometheus 909
 
 | File | Role |
 |------|------|
-| `go-gateway.yaml` | go-gateway Deployment + Service |
-| `python-ai.yaml` | python-ai Deployment + Service |
-| `ollama-svc.yaml` | ExternalName Service → host Ollama |
-| `go-gateway-hpa.yaml` | HorizontalPodAutoscaler on `p99_latency` |
-| `go-gateway-monitor.yaml` | ServiceMonitor for in-cluster Prometheus |
+| `k8s/go-gateway.yaml` | go-gateway Deployment + Service |
+| `k8s/python-ai.yaml` | python-ai Deployment + Service |
+| `k8s/ollama-svc.yaml` | ExternalName Service → host Ollama |
+| `k8s/go-gateway-hpa.yaml` | HorizontalPodAutoscaler on `p99_latency` |
+| `k8s/go-gateway-monitor.yaml` | ServiceMonitor for in-cluster Prometheus |
 | `k8s/prometheus-stack-values.yaml` | kube-prometheus-stack Helm values |
-| `adapter-values.yaml` | prometheus-adapter rule mapping histogram → `p99_latency` |
+| `k8s/adapter-values.yaml` | prometheus-adapter rule mapping histogram → `p99_latency` |
 
 ## Observability
 
@@ -314,6 +330,26 @@ kubectl port-forward -n monitoring svc/prometheus-kube-prometheus-prometheus 909
 
 Both services instrument all requests with OpenTelemetry, propagating trace context via gRPC metadata. View full request traces at http://localhost:16686.
 
+### Troubleshooting latency (Grafana + Jaeger)
+
+Use the metrics below together to tell whether slowness sits in the Go gateway or in downstream inference.
+
+**Scenario A — `/predict/model` P99 is high, but `ai_generation_duration_seconds` is normal**
+
+Suppose Grafana shows `http_request_duration_seconds` P99 for `/predict/model` jumping from ~2 s to ~8 s, while `ai_generation_duration_seconds` for `qwen2.5:1.5b` stays around ~2 s.
+
+1. In Grafana, compare gateway HTTP latency (`http_request_duration_seconds`) with gRPC client latency (`grpc_request_duration_seconds{grpc_method="ModelPredict"}`).
+2. If HTTP P99 is high but gRPC P99 is low, the bottleneck is likely **before or after** the upstream call (JSON parsing, timeouts, connection setup in go-gateway).
+3. Open Jaeger, filter by service `go-gateway`, find a slow trace, and check span durations inside the gateway vs. the `python-ai` child span. A long gap before the gRPC span points to gateway-side work; a long `python-ai` span points downstream.
+
+**Scenario B — HTTP and `ai_generation_duration_seconds` both rise together**
+
+Suppose `http_requests_total` for `/predict/model` stays steady (no error spike), but both `http_request_duration_seconds` P99 and `ai_generation_duration_seconds` P99 climb from ~2 s to ~15 s.
+
+1. In Grafana, plot `grpc_request_duration_seconds` for `ModelPredict` — it should track `ai_generation_duration_seconds`.
+2. In Jaeger, open a slow trace: if the `python-ai` → Ollama portion dominates the timeline, the issue is **model inference** (GPU load, Ollama queue, prompt length), not the gateway.
+3. Cross-check `http_requests_total` by status — if 5xx/`MODEL_TIMEOUT` counts rise at the same time, consider increasing `MODEL_TIMEOUT` or scaling python-ai / Ollama capacity rather than gateway replicas.
+
 ### Optional GPU Metrics Exporter
 
 You can start the Python GPU exporter separately (outside Docker Compose):
@@ -326,7 +362,17 @@ It exposes metrics at `http://localhost:9835/metrics`.
 
 ### Profiling (pprof)
 
-Go gateway exposes runtime profiling at http://localhost:6060/debug/pprof — useful for CPU and memory analysis under load.
+Go runtime profiling is **disabled by default**. To enable it:
+
+```bash
+# docker compose — set PPROF_ENABLED=true and expose port 6060 (see docker-compose.yml)
+PPROF_ENABLED=true docker compose up --build
+
+# Kubernetes — port-forward after enabling PPROF_ENABLED in the deployment
+./deploy.sh forward   # forwards :8080 and :6060 when pprof is enabled
+```
+
+When enabled, pprof is available at `http://localhost:6060/debug/pprof` — useful for CPU and memory analysis under load.
 
 ## Project Structure
 
@@ -353,9 +399,16 @@ Go gateway exposes runtime profiling at http://localhost:6060/debug/pprof — us
 │   └── gen/                # Generated gRPC stubs
 ├── test/
 │   └── test.js             # k6 load test
-├── k8s/
-│   └── prometheus-stack-values.yaml  # in-cluster Prometheus (HPA)
-├── adapter-values.yaml     # prometheus-adapter rules (p99_latency)
+├── k8s/                    # Kubernetes manifests & Helm values
+│   ├── go-gateway.yaml
+│   ├── python-ai.yaml
+│   ├── ollama-svc.yaml
+│   ├── go-gateway-hpa.yaml
+│   ├── go-gateway-monitor.yaml
+│   ├── prometheus-stack-values.yaml
+│   └── adapter-values.yaml
+├── .github/workflows/
+│   └── ci.yml              # CI: gofmt, vet, test, ruff, docker build
 ├── docker-compose.yml
 ├── prometheus.yml          # Docker Prometheus scrape config
 ├── buf.gen.yaml            # Protobuf code generation config

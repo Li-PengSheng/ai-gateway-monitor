@@ -15,7 +15,8 @@ func Setup(
 	r := gin.Default()
 
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
-	r.GET("/health", health.Check)
+	r.GET("/healthz", health.Check)
+	r.GET("/readyz", health.Readyz)
 	r.POST("/predict/iris", iris.Predict)
 	r.POST("/predict/model", model.Predict)
 	r.POST("/predict/model/stream", model.PredictStream)

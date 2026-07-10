@@ -25,9 +25,15 @@ spec:
                         value: "172.17.141.222:4317"
                   livenessProbe:
                       httpGet:
-                          path: /metrics # 借用 metrics 接口做存活检查
+                          path: /healthz
                           port: 8080
                       initialDelaySeconds: 10
+                      periodSeconds: 10
+                  readinessProbe:
+                      httpGet:
+                          path: /readyz
+                          port: 8080
+                      initialDelaySeconds: 5
                       periodSeconds: 10
 ---
 apiVersion: v1
