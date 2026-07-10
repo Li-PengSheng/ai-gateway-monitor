@@ -76,6 +76,7 @@ Services will be available at:
 | API Gateway | http://localhost:8080                        |
 | Prometheus  | http://localhost:9090                        |
 | Grafana     | http://localhost:3000 (admin/admin)          |
+|             | Dashboard: **AI Gateway** → **AI Gateway Monitor** (auto-imported) |
 | Jaeger UI   | http://localhost:16686                       |
 
 ### API Examples
@@ -399,6 +400,9 @@ When enabled, pprof is available at `http://localhost:6060/debug/pprof` — usef
 │   └── gen/                # Generated gRPC stubs
 ├── test/
 │   └── test.js             # k6 load test
+├── grafana/                # Grafana provisioning (auto-import on compose up)
+│   ├── provisioning/       # datasource + dashboard provider config
+│   └── dashboards/         # ai-gateway-dashboard.json
 ├── k8s/                    # Kubernetes manifests & Helm values
 │   ├── go-gateway.yaml
 │   ├── python-ai.yaml

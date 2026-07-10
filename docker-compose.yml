@@ -56,11 +56,17 @@ services:
         ports:
             - "9090:9090"
 
-    # Grafana visualization dashboard
+    # Grafana visualization dashboard (auto-provisioned from grafana/)
     grafana:
         image: grafana/grafana:13.1.0
         ports:
             - "3000:3000"
+        environment:
+            - GF_SECURITY_ADMIN_USER=admin
+            - GF_SECURITY_ADMIN_PASSWORD=admin
+        volumes:
+            - ./grafana/provisioning:/etc/grafana/provisioning
+            - ./grafana/dashboards:/etc/grafana/dashboards
         networks:
             - ai-network
         depends_on:
