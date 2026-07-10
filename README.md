@@ -150,11 +150,26 @@ docker run --rm -i --network host grafana/k6 run - < test/test.js
 ./deploy.sh test          # or: ./deploy.sh loadtest 120
 ```
 
-Under k6 load test (30 VUs): peak QPS ~15 req/s, GPU utilization up to 80%, VRAM ~2.5 GB, Go gateway RSS only ~36 MiB
+Under k6 load test (30 VUs spike): **~8 req/s** total QPS (Iris ~3.9, Model ~4.3), **76 tokens/s** AI throughput (burst peaks ~140 tokens/s), **0% HTTP errors**, GPU utilization up to **80%**, VRAM **~2.5 GB**, GPU temp **~70 °C**, Go gateway RSS **~31 MiB**.
 
-![AI Dashboard Overview](assets/project-ai-gateway-screenshot1.png)
+![k6 Load Test — Grafana Dashboard](assets/k6-test.png)
 
-![GPU and Go Runtime Metrics](assets/project-ai-gateway-screenshot2.png)
+**Observed metrics (Grafana, 30 VUs spike phase):**
+
+| Category | Metric | Value |
+|----------|--------|-------|
+| Throughput | Total QPS | ~8.2 req/s |
+| Throughput | Iris / Model QPS | ~3.9 / ~4.3 req/s |
+| Throughput | AI tokens/s (`qwen2.5:1.5b`) | ~76 (burst ~140) |
+| Latency | Model HTTP p99 | ~4.4 s |
+| Latency | Iris HTTP p95 / p99 | ~2 s / ~3 s |
+| Latency | AI generation p50 / p95 / p99 | ~480 ms / ~500 ms / ~800 ms |
+| Latency | gRPC ModelPredict p50 | ~1.5 s |
+| Errors | HTTP / gRPC error rate | 0% |
+| GPU | Utilization / VRAM / Temp | ~80% / ~2.5 GB / ~70 °C |
+| Go runtime | Goroutines / RSS / GC avg | ~80 / ~31 MiB / ~600 µs |
+
+> AI generation latency (~800 ms p99) is much lower than end-to-end Model HTTP p99 (~4.4 s), indicating most wall-clock time is gateway + gRPC overhead rather than Ollama inference alone — see [Troubleshooting latency](#troubleshooting-latency-grafana--jaeger).
 
 **Load profile:**
 
@@ -166,13 +181,13 @@ Under k6 load test (30 VUs): peak QPS ~15 req/s, GPU utilization up to 80%, VRAM
 | Hold spike   | 30 s     | 30       |
 | Ramp-down    | 10 s     | 30 → 0   |
 
-**Thresholds (all passed):**
+**Thresholds:**
 
-| Metric | Target | Actual |
-|--------|--------|--------|
-| Iris p95 latency | < 500 ms | ✓ |
-| Model p95 latency | < 30 s | ✓ |
-| HTTP error rate | < 1% | ✓ |
+| Metric | Target | Actual (latest run) |
+|--------|--------|---------------------|
+| Iris p95 latency | < 500 ms | ~2 s HTTP p95 at 30 VU spike (exceeds target under heavy mixed load) |
+| Model p95 latency | < 30 s | ✓ (~4 s HTTP p95) |
+| HTTP error rate | < 1% | ✓ (0% observed in Grafana) |
 
 ## Kubernetes Deployment & Autoscaling
 
