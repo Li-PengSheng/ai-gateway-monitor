@@ -18,7 +18,8 @@
 #    ./deploy.sh hpa-stack  # install kube-prometheus-stack + prometheus-adapter
 #    ./deploy.sh apply      # hpa-stack + kubectl apply manifests
 #    ./deploy.sh monitor    # start docker compose monitoring stack
-#    ./deploy.sh forward    # port-forward gateway → localhost:8080 / :6060
+#    ./deploy.sh forward    # port-forward gateway → localhost:8080 / :6060 (foreground)
+#    ./deploy.sh forward-stop  # stop background port-forward from full setup
 #    ./deploy.sh loadtest [SECONDS]  # in-cluster load generator (default 120s)
 #    ./deploy.sh verify-hpa # check custom.metrics.k8s.io + HPA metric values
 #    ./deploy.sh gpu        # start GPU exporter (native)
@@ -69,6 +70,8 @@ KIND_CLUSTER="${KIND_CLUSTER:-ai-gateway}"
 # In-cluster load generator (HPA scale-up test)
 LOADTEST_DURATION="${LOADTEST_DURATION:-120}"
 LOADTEST_PARALLELISM="${LOADTEST_PARALLELISM:-40}"
+
+FORWARD_PID_FILE="/tmp/go-gateway-forward.pids"
 
 # ── helpers ───────────────────────────────────────────────────
 check_deps() {
@@ -533,8 +536,50 @@ start_monitoring() {
   info "  Jaeger     → http://localhost:16686"
   echo ""
   info "  In-cluster Prometheus → ./deploy.sh verify-hpa  (HPA metrics, optional :9091 port-forward)"
+}
+
+stop_port_forward() {
+  if [[ -f "$FORWARD_PID_FILE" ]]; then
+    while read -r pid; do
+      [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
+    done < "$FORWARD_PID_FILE"
+    rm -f "$FORWARD_PID_FILE"
+    success "Background port-forward stopped"
+  fi
+}
+
+start_port_forward_background() {
+  if ! kubectl get svc go-gateway-svc &>/dev/null; then
+    warn "go-gateway-svc not found — skipping port-forward (Grafana will have no gateway metrics)"
+    return
+  fi
+
+  stop_port_forward
+
+  step "Starting port-forward in background (go-gateway-svc → :8080 / :6060)"
+  info "Docker Prometheus scrapes http://host.docker.internal:8080/metrics via this tunnel"
+
+  kubectl port-forward --address 0.0.0.0 svc/go-gateway-svc 8080:80 \
+    > /tmp/go-gateway-forward-8080.log 2>&1 &
+  echo $! >> "$FORWARD_PID_FILE"
+  kubectl port-forward --address 0.0.0.0 svc/go-gateway-svc 6060:6060 \
+    > /tmp/go-gateway-forward-6060.log 2>&1 &
+  echo $! >> "$FORWARD_PID_FILE"
+
+  sleep 1
+  success "Port-forward running in background (PIDs in $FORWARD_PID_FILE)"
+  info "  curl http://localhost:8080/healthz"
+  info "  Stop: ./deploy.sh forward-stop"
+}
+
+port_forward_gateway() {
+  step "Port-forwarding go-gateway-svc → 0.0.0.0:8080"
+  info "Prometheus will scrape metrics at http://host.docker.internal:8080/metrics"
+  warn "Keep this terminal open — Ctrl+C to stop"
   echo ""
-  warn "Run './deploy.sh forward' in a new terminal so Docker Prometheus can scrape the gateway"
+  kubectl port-forward --address 0.0.0.0 svc/go-gateway-svc 8080:80 &
+  kubectl port-forward --address 0.0.0.0 svc/go-gateway-svc 6060:6060 &
+  wait
 }
 
 start_gpu_exporter() {
@@ -551,16 +596,6 @@ start_gpu_exporter() {
   info "  Metrics → http://localhost:9835/metrics"
   info "  Logs    → tail -f /tmp/gpu_exporter.log"
   warn "  Stop    → ./deploy.sh gpu-stop"
-}
-
-port_forward_gateway() {
-  step "Port-forwarding go-gateway-svc → 0.0.0.0:8080"
-  info "Prometheus will scrape metrics at http://host.docker.internal:8080/metrics"
-  warn "Keep this terminal open — Ctrl+C to stop"
-  echo ""
-  kubectl port-forward --address 0.0.0.0 svc/go-gateway-svc 8080:80 &
-  kubectl port-forward --address 0.0.0.0 svc/go-gateway-svc 6060:6060 &
-  wait
 }
 
 show_status() {
@@ -592,7 +627,8 @@ show_status() {
   echo -e "${BOLD}── Next steps ───────────────────────────────────────${NC}"
   echo "  ./deploy.sh test       # end-to-end HPA proof (load + watch scale-up)"
   echo "  ./deploy.sh verify-hpa # inspect custom.metrics.k8s.io + HPA values"
-  echo "  ./deploy.sh forward    # expose gateway → localhost:8080 (curl / k6)"
+  echo "  ./deploy.sh forward    # foreground port-forward (blocks terminal)"
+  echo "  ./deploy.sh forward-stop  # stop background port-forward"
 }
 
 show_logs() {
@@ -614,6 +650,8 @@ reset_all() {
   success "K8s resources deleted"
 
   uninstall_hpa_stack
+
+  stop_port_forward
 
   step "Stopping Docker Compose monitoring stack"
   if docker compose version &>/dev/null && [[ -f "$SCRIPT_DIR/docker-compose.yml" ]]; then
@@ -667,9 +705,13 @@ case "$CMD" in
     patch_prometheus_target
     patch_prometheus_gpu
     start_monitoring
+    start_port_forward_background
     ;;
   forward)
     port_forward_gateway
+    ;;
+  forward-stop)
+    stop_port_forward
     ;;
   gpu)
     patch_prometheus_gpu
@@ -722,6 +764,7 @@ case "$CMD" in
     rollout_restart
     wait_for_pods
     start_monitoring
+    start_port_forward_background
     show_status
     ;;
 esac

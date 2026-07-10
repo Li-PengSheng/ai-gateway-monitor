@@ -206,6 +206,9 @@ This runs, in order:
 3. **hpa-stack** — `helm install` kube-prometheus-stack + prometheus-adapter (in-cluster Prometheus)
 4. **apply** — apply all manifests (Deployments, Services, ServiceMonitor, HPA)
 5. **monitor** — start the Docker Compose monitoring stack (Prometheus/Grafana/Jaeger)
+6. **forward** — start background port-forward so Docker Prometheus can scrape the in-cluster gateway (`:8080` → Grafana)
+
+After setup, open Grafana at http://localhost:3000 — metrics appear once traffic hits the gateway (e.g. `curl http://localhost:8080/healthz` or `./deploy.sh test`).
 
 ### One command to test autoscaling
 
@@ -235,16 +238,17 @@ timing vary run to run, but the scale-up pattern and events are real):
 
 | Command | What it does |
 |---------|--------------|
-| `./deploy.sh` (or `up`) | Full setup: cluster + build + hpa-stack + apply + monitor |
+| `./deploy.sh` (or `up`) | Full setup: cluster + build + hpa-stack + apply + monitor + background forward |
 | `./deploy.sh test` | End-to-end HPA proof: in-cluster k6 load + watch scale-up |
 | `./deploy.sh status` | Pods / Services / HPA / custom-metrics API overview |
-| `./deploy.sh reset` | Delete manifests + helm stack + stop Docker Compose |
+| `./deploy.sh reset` | Delete manifests + helm stack + stop Docker Compose + stop forward |
 | `./deploy.sh cluster` | Create the local `kind` cluster only |
 | `./deploy.sh build` | Build images and load them into the cluster |
 | `./deploy.sh hpa-stack` | Install kube-prometheus-stack + prometheus-adapter |
 | `./deploy.sh apply` | Install HPA stack + apply all manifests |
-| `./deploy.sh monitor` | Start Docker Compose Prometheus/Grafana/Jaeger |
-| `./deploy.sh forward` | Port-forward gateway → `localhost:8080` / `:6060` |
+| `./deploy.sh monitor` | Start Docker Compose Prometheus/Grafana/Jaeger + background forward |
+| `./deploy.sh forward` | Port-forward gateway → `localhost:8080` / `:6060` (foreground, blocks terminal) |
+| `./deploy.sh forward-stop` | Stop background port-forward started by full setup |
 | `./deploy.sh loadtest [SECONDS]` | Run the in-cluster k6 load generator (default 120s) |
 | `./deploy.sh verify-hpa` | Inspect `custom.metrics.k8s.io` + per-pod `p99_latency` |
 | `./deploy.sh gpu` | Start the native GPU exporter |
@@ -305,9 +309,11 @@ kubectl describe hpa go-gateway-hpa
 | **In-cluster Prometheus** | `monitoring` namespace | cluster-internal | Per-pod scrape via `ServiceMonitor` → `prometheus-adapter` → HPA |
 
 ```
-Dev path:   App → port-forward :8080 → Docker Prometheus → Grafana
+Dev path:   K8s gateway → background port-forward :8080 → Docker Prometheus → Grafana
 HPA path:   App Pod → ServiceMonitor → in-cluster Prometheus → Adapter → HPA
 ```
+
+`./deploy.sh` and `./deploy.sh monitor` automatically start the background port-forward. During `./deploy.sh test`, k6 hits the in-cluster Service directly; Grafana still receives metrics because port-forward exposes pod metrics on `localhost:8080` for Docker Prometheus to scrape.
 
 Why two? The HPA needs **per-pod** metrics with a `pod` label. The Docker Prometheus scrapes the gateway through a load-balanced Service (aggregated, no per-pod identity), so it can't drive per-pod autoscaling — it's kept purely for local dashboards. In production these usually collapse into a single in-cluster (or managed) Prometheus that serves both dashboards and autoscaling.
 
