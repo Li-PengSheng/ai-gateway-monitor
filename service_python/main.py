@@ -15,6 +15,9 @@ if __name__ == "__main__":
     model_predictor = ModelPredictor(
         ollama_host=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
         model_name=os.getenv("MODEL_NAME", "qwen2.5:1.5b"),
+        # Slightly below the gateway's MODEL_TIMEOUT (60s) so the worker thread
+        # is released even when the caller has already given up.
+        timeout_sec=float(os.getenv("OLLAMA_TIMEOUT_SEC", "55")),
     )
 
     server = create_server(iris_predictor, model_predictor)

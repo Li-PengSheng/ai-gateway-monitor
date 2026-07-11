@@ -12,17 +12,26 @@ spec:
             labels:
                 app: go-gateway
         spec:
+            # Must exceed SHUTDOWN_TIMEOUT (75s) so in-flight model requests
+            # can drain before the kubelet sends SIGKILL.
+            terminationGracePeriodSeconds: 90
             containers:
                 - name: go-gateway
                   image: go-gateway:v2
                   ports:
                       - containerPort: 8080 #
-                      - containerPort: 6060
                   env:
                       - name: AI_SERVICE_ADDR
                         value: "python-ai-svc:50051" # 使用 K8s Service 名称进行内部通信
                       - name: JAEGER_ENDPOINT
                         value: "172.17.141.222:4317"
+                  resources:
+                      requests:
+                          cpu: 100m
+                          memory: 64Mi
+                      limits:
+                          cpu: "1"
+                          memory: 256Mi
                   livenessProbe:
                       httpGet:
                           path: /healthz
@@ -50,7 +59,6 @@ spec:
           protocol: TCP
           port: 80
           targetPort: 8080
-        - name: pprof # 为 pprof 配置 Service 端口映射
-          protocol: TCP
-          port: 6060
-          targetPort: 6060
+    # pprof (:6060) is intentionally not exposed: it binds to localhost inside
+    # the pod. Use `kubectl port-forward deployment/go-gateway 6060:6060`
+    # (with PPROF_ENABLED=true) for profiling.

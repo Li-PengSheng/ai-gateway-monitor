@@ -21,6 +21,7 @@ type Config struct {
 	HTTPReadTimeout  time.Duration
 	HTTPWriteTimeout time.Duration
 	HTTPIdleTimeout  time.Duration
+	ShutdownTimeout  time.Duration
 
 	GRPCKeepAliveTime    time.Duration
 	GRPCKeepAliveTimeout time.Duration
@@ -31,20 +32,32 @@ type Config struct {
 	MaxPromptLen int
 }
 
+// writeTimeoutHeadroom is added on top of ModelTimeout so the handler can
+// still flush a well-formed timeout response before the connection deadline.
+const writeTimeoutHeadroom = 15 * time.Second
+
 func Load() *Config {
-	return &Config{
-		HTTPAddr:       getEnv("HTTP_ADDR", ":8080"),
-		PProfAddr:      getEnv("PPROF_ADDR", ":6060"),
+	cfg := &Config{
+		HTTPAddr: getEnv("HTTP_ADDR", ":8080"),
+		// localhost-only by default: pprof exposes heap/goroutine dumps and
+		// must not be reachable from outside the pod/host unless opted in.
+		PProfAddr:      getEnv("PPROF_ADDR", "localhost:6060"),
 		PProfEnabled:   getEnvBool("PPROF_ENABLED", false),
 		AIServiceAddr:  getEnv("AI_SERVICE_ADDR", "localhost:50051"),
 		JaegerEndpoint: getEnv("JAEGER_ENDPOINT", "localhost:4317"),
 		LogLevel:       getEnv("LOG_LEVEL", "info"),
 
 		HTTPReadTimeout:  getEnvDuration("HTTP_READ_TIMEOUT", 10*time.Second),
-		HTTPWriteTimeout: getEnvDuration("HTTP_WRITE_TIMEOUT", 10*time.Second),
+		HTTPWriteTimeout: getEnvDuration("HTTP_WRITE_TIMEOUT", 75*time.Second),
 		HTTPIdleTimeout:  getEnvDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
+		// Grace period for in-flight requests on SIGTERM; should cover
+		// MODEL_TIMEOUT and stay under the pod's terminationGracePeriodSeconds.
+		ShutdownTimeout: getEnvDuration("SHUTDOWN_TIMEOUT", 75*time.Second),
 
-		GRPCKeepAliveTime:    getEnvDuration("GRPC_KEEP_ALIVE_TIME", 10*time.Second),
+		// Must stay above the python-ai server's
+		// grpc.http2.min_ping_interval_without_data_ms (20s), otherwise the
+		// server answers keepalive pings with GOAWAY "too_many_pings".
+		GRPCKeepAliveTime:    getEnvDuration("GRPC_KEEP_ALIVE_TIME", 30*time.Second),
 		GRPCKeepAliveTimeout: getEnvDuration("GRPC_KEEP_ALIVE_TIMEOUT", 3*time.Second),
 		GRPCMaxRecvMsgSize:   getEnvInt("GRPC_MAX_RECV_MSG_SIZE", 50*1024*1024),
 
@@ -52,6 +65,17 @@ func Load() *Config {
 		ModelTimeout: getEnvDuration("MODEL_TIMEOUT", 60*time.Second),
 		MaxPromptLen: getEnvInt("MAX_PROMPT_LEN", 2000),
 	}
+
+	// http.Server.WriteTimeout is an absolute deadline for the whole response.
+	// If it is shorter than ModelTimeout, every LLM generation (or SSE stream)
+	// that outlives it gets its connection killed mid-response.
+	if minWrite := cfg.ModelTimeout + writeTimeoutHeadroom; cfg.HTTPWriteTimeout > 0 && cfg.HTTPWriteTimeout < minWrite {
+		slog.Warn("HTTP_WRITE_TIMEOUT shorter than MODEL_TIMEOUT would cut off model responses; raising it",
+			"configured", cfg.HTTPWriteTimeout.String(), "effective", minWrite.String())
+		cfg.HTTPWriteTimeout = minWrite
+	}
+
+	return cfg
 }
 
 func getEnv(key, fallback string) string {

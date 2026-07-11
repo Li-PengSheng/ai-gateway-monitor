@@ -110,6 +110,28 @@ func TestIrisPredictMissingFields(t *testing.T) {
 	assertValidationAPIError(t, w, "all iris features are required")
 }
 
+func TestIrisPredictOutOfRangeRejected(t *testing.T) {
+	r := setupIrisRouter(t, &mockIrisClient{})
+
+	tests := []struct {
+		name    string
+		payload string
+	}{
+		{name: "negative", payload: `{"sepal_length":-1,"sepal_width":3.5,"petal_length":1.4,"petal_width":0.2}`},
+		{name: "too large", payload: `{"sepal_length":5.1,"sepal_width":3.5,"petal_length":1.4,"petal_width":999}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/predict/iris", bytes.NewBufferString(tt.payload))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			assertValidationAPIError(t, w, "must be")
+		})
+	}
+}
+
 func TestIrisPredictAllZeroFieldsAccepted(t *testing.T) {
 	r := setupIrisRouter(t, &mockIrisClient{})
 

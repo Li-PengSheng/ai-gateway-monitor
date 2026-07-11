@@ -24,8 +24,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.HTTPAddr != ":8080" {
 		t.Errorf("HTTPAddr = %q, want :8080", cfg.HTTPAddr)
 	}
-	if cfg.PProfAddr != ":6060" {
-		t.Errorf("PProfAddr = %q, want :6060", cfg.PProfAddr)
+	if cfg.PProfAddr != "localhost:6060" {
+		t.Errorf("PProfAddr = %q, want localhost:6060", cfg.PProfAddr)
 	}
 	if cfg.PProfEnabled {
 		t.Error("PProfEnabled = true, want false")
@@ -42,14 +42,14 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.HTTPReadTimeout != 10*time.Second {
 		t.Errorf("HTTPReadTimeout = %v, want 10s", cfg.HTTPReadTimeout)
 	}
-	if cfg.HTTPWriteTimeout != 10*time.Second {
-		t.Errorf("HTTPWriteTimeout = %v, want 10s", cfg.HTTPWriteTimeout)
+	if cfg.HTTPWriteTimeout != 75*time.Second {
+		t.Errorf("HTTPWriteTimeout = %v, want 75s", cfg.HTTPWriteTimeout)
 	}
 	if cfg.HTTPIdleTimeout != 60*time.Second {
 		t.Errorf("HTTPIdleTimeout = %v, want 60s", cfg.HTTPIdleTimeout)
 	}
-	if cfg.GRPCKeepAliveTime != 10*time.Second {
-		t.Errorf("GRPCKeepAliveTime = %v, want 10s", cfg.GRPCKeepAliveTime)
+	if cfg.GRPCKeepAliveTime != 30*time.Second {
+		t.Errorf("GRPCKeepAliveTime = %v, want 30s", cfg.GRPCKeepAliveTime)
 	}
 	if cfg.GRPCKeepAliveTimeout != 3*time.Second {
 		t.Errorf("GRPCKeepAliveTimeout = %v, want 3s", cfg.GRPCKeepAliveTimeout)
@@ -79,7 +79,7 @@ func TestLoadEnvOverrides(t *testing.T) {
 	t.Setenv("MAX_PROMPT_LEN", "500")
 	t.Setenv("LOG_LEVEL", "debug")
 	t.Setenv("HTTP_READ_TIMEOUT", "20s")
-	t.Setenv("HTTP_WRITE_TIMEOUT", "25s")
+	t.Setenv("HTTP_WRITE_TIMEOUT", "150s")
 	t.Setenv("HTTP_IDLE_TIMEOUT", "90s")
 
 	cfg := Load()
@@ -114,11 +114,34 @@ func TestLoadEnvOverrides(t *testing.T) {
 	if cfg.HTTPReadTimeout != 20*time.Second {
 		t.Errorf("HTTPReadTimeout = %v, want 20s", cfg.HTTPReadTimeout)
 	}
-	if cfg.HTTPWriteTimeout != 25*time.Second {
-		t.Errorf("HTTPWriteTimeout = %v, want 25s", cfg.HTTPWriteTimeout)
+	if cfg.HTTPWriteTimeout != 150*time.Second {
+		t.Errorf("HTTPWriteTimeout = %v, want 150s", cfg.HTTPWriteTimeout)
 	}
 	if cfg.HTTPIdleTimeout != 90*time.Second {
 		t.Errorf("HTTPIdleTimeout = %v, want 90s", cfg.HTTPIdleTimeout)
+	}
+}
+
+func TestWriteTimeoutRaisedToCoverModelTimeout(t *testing.T) {
+	t.Setenv("MODEL_TIMEOUT", "60s")
+	t.Setenv("HTTP_WRITE_TIMEOUT", "10s")
+
+	cfg := Load()
+
+	want := 60*time.Second + writeTimeoutHeadroom
+	if cfg.HTTPWriteTimeout != want {
+		t.Errorf("HTTPWriteTimeout = %v, want %v (raised to cover MODEL_TIMEOUT)", cfg.HTTPWriteTimeout, want)
+	}
+}
+
+func TestWriteTimeoutDisabledIsKept(t *testing.T) {
+	t.Setenv("MODEL_TIMEOUT", "60s")
+	t.Setenv("HTTP_WRITE_TIMEOUT", "0s")
+
+	cfg := Load()
+
+	if cfg.HTTPWriteTimeout != 0 {
+		t.Errorf("HTTPWriteTimeout = %v, want 0 (disabled)", cfg.HTTPWriteTimeout)
 	}
 }
 

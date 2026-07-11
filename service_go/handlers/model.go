@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
@@ -37,7 +38,9 @@ func (h *ModelHandler) Predict(c *gin.Context) {
 		writeValidationError(c, "/predict/model", err.Error())
 		return
 	}
-	if len(body.Prompt) > h.cfg.MaxPromptLen {
+	// Count runes, not bytes: with len() a Chinese prompt would hit the limit
+	// at roughly a third of the advertised character budget.
+	if utf8.RuneCountInString(body.Prompt) > h.cfg.MaxPromptLen {
 		writeValidationError(c, "/predict/model",
 			fmt.Sprintf("prompt exceeds maximum length of %d characters", h.cfg.MaxPromptLen))
 		return
@@ -94,7 +97,7 @@ func (h *ModelHandler) PredictStream(c *gin.Context) {
 		writeValidationError(c, "/predict/model/stream", err.Error())
 		return
 	}
-	if len(body.Prompt) > h.cfg.MaxPromptLen {
+	if utf8.RuneCountInString(body.Prompt) > h.cfg.MaxPromptLen {
 		writeValidationError(c, "/predict/model/stream",
 			fmt.Sprintf("prompt exceeds maximum length of %d characters", h.cfg.MaxPromptLen))
 		return

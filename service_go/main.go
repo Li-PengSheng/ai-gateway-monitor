@@ -54,6 +54,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer conn.Close()
+	// grpc.NewClient is lazy — start dialing now so /readyz reflects real
+	// backend reachability instead of a permanent Idle state.
+	conn.Connect()
 
 	// Handlers
 	healthHandler := handlers.NewHealthHandler(conn)
@@ -84,7 +87,7 @@ func main() {
 	<-quit
 
 	slog.Info("Shutting down gracefully...")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.GRPCKeepAliveTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("forced shutdown", "error", err)

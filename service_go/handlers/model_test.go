@@ -102,6 +102,23 @@ func TestModelPredictPromptTooLong(t *testing.T) {
 	}
 }
 
+func TestModelPredictPromptLengthCountsRunes(t *testing.T) {
+	// 10 Chinese characters = 30 bytes; with a 10-char limit this must pass,
+	// which fails if the handler measures bytes instead of runes.
+	const maxLen = 10
+	r := setupModelRouter(t, &mockModelClient{}, maxLen)
+
+	payload := fmt.Sprintf(`{"prompt":"%s"}`, strings.Repeat("语", maxLen))
+	req := httptest.NewRequest(http.MethodPost, "/predict/model", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusOK, w.Body.String())
+	}
+}
+
 func TestModelPredictInvalidJSON(t *testing.T) {
 	r := setupModelRouter(t, &mockModelClient{}, 2000)
 

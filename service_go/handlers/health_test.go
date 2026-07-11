@@ -90,12 +90,15 @@ func TestHealthzAlwaysOK(t *testing.T) {
 
 func TestReadyzConnStates(t *testing.T) {
 	tests := []struct {
-		name       string
-		state      connectivity.State
-		wantStatus int
+		name        string
+		state       connectivity.State
+		wantStatus  int
+		wantConnect bool
 	}{
-		{name: "idle", state: connectivity.Idle, wantStatus: http.StatusOK},
-		{name: "connecting", state: connectivity.Connecting, wantStatus: http.StatusOK},
+		// Idle means "never dialed" (grpc.NewClient is lazy) — the backend may
+		// be down, so it must not count as ready; readyz kicks off a dial.
+		{name: "idle", state: connectivity.Idle, wantStatus: http.StatusServiceUnavailable, wantConnect: true},
+		{name: "connecting", state: connectivity.Connecting, wantStatus: http.StatusServiceUnavailable},
 		{name: "ready", state: connectivity.Ready, wantStatus: http.StatusOK},
 		{name: "transient failure", state: connectivity.TransientFailure, wantStatus: http.StatusServiceUnavailable},
 		{name: "shutdown", state: connectivity.Shutdown, wantStatus: http.StatusServiceUnavailable},
@@ -103,7 +106,8 @@ func TestReadyzConnStates(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := setupHealthRouter(&mockConn{state: tt.state})
+			conn := &mockConn{state: tt.state}
+			r := setupHealthRouter(conn)
 
 			req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 			w := httptest.NewRecorder()
@@ -111,6 +115,9 @@ func TestReadyzConnStates(t *testing.T) {
 
 			if w.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d; body = %s", w.Code, tt.wantStatus, w.Body.String())
+			}
+			if conn.connectCalled != tt.wantConnect {
+				t.Fatalf("connectCalled = %v, want %v", conn.connectCalled, tt.wantConnect)
 			}
 		})
 	}
@@ -129,9 +136,14 @@ func TestReadyzNilConn(t *testing.T) {
 }
 
 type mockConn struct {
-	state connectivity.State
+	state         connectivity.State
+	connectCalled bool
 }
 
 func (m *mockConn) GetState() connectivity.State {
 	return m.state
+}
+
+func (m *mockConn) Connect() {
+	m.connectCalled = true
 }

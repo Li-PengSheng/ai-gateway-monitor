@@ -1,3 +1,4 @@
 .venv/
 .ruff_cache/
 ai-gateway-monitor-analysis.md
+docs/bugfix-notes.md

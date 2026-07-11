@@ -116,22 +116,24 @@ Environment variables for each service:
 | Variable                  | Service              | Default              | Description                                      |
 |---------------------------|----------------------|----------------------|--------------------------------------------------|
 | `HTTP_ADDR`               | go-gateway           | `:8080`              | Go gateway HTTP listen address                   |
-| `PPROF_ADDR`              | go-gateway           | `:6060`              | pprof listen address (when enabled)              |
+| `PPROF_ADDR`              | go-gateway           | `localhost:6060`     | pprof listen address (localhost-only by default) |
 | `PPROF_ENABLED`           | go-gateway           | `false`              | Enable Go runtime profiling endpoint             |
 | `AI_SERVICE_ADDR`         | go-gateway           | `localhost:50051`    | Python gRPC backend address                      |
 | `JAEGER_ENDPOINT`         | go-gateway/python-ai | `localhost:4317`     | OTLP endpoint for tracing export                 |
-| `LOG_LEVEL`               | go-gateway           | `info`               | slog log level (`debug`, `info`, `warn`, `error`) |
+| `LOG_LEVEL`               | go-gateway/python-ai | `info`               | Log level (`debug`, `info`, `warn`, `error`)     |
 | `HTTP_READ_TIMEOUT`       | go-gateway           | `10s`                | HTTP server read timeout                         |
-| `HTTP_WRITE_TIMEOUT`      | go-gateway           | `10s`                | HTTP server write timeout                        |
+| `HTTP_WRITE_TIMEOUT`      | go-gateway           | `75s`                | HTTP write timeout (≥ `MODEL_TIMEOUT` + 15s)     |
 | `HTTP_IDLE_TIMEOUT`       | go-gateway           | `60s`                | HTTP server idle timeout                         |
-| `GRPC_KEEP_ALIVE_TIME`    | go-gateway           | `10s`                | gRPC client keepalive ping interval              |
+| `SHUTDOWN_TIMEOUT`        | go-gateway           | `75s`                | Graceful shutdown window for in-flight requests  |
+| `GRPC_KEEP_ALIVE_TIME`    | go-gateway           | `30s`                | gRPC client keepalive ping interval              |
 | `GRPC_KEEP_ALIVE_TIMEOUT` | go-gateway           | `3s`                 | gRPC client keepalive ping timeout               |
 | `GRPC_MAX_RECV_MSG_SIZE`  | go-gateway           | `52428800` (50 MB)   | gRPC max receive message size (bytes)            |
 | `IRIS_TIMEOUT`            | go-gateway           | `3s`                 | Timeout for `/predict/iris` upstream call        |
 | `MODEL_TIMEOUT`           | go-gateway           | `60s`                | Timeout for `/predict/model` upstream calls      |
-| `MAX_PROMPT_LEN`          | go-gateway           | `2000`               | Max prompt length for model endpoints            |
+| `MAX_PROMPT_LEN`          | go-gateway           | `2000`               | Max prompt length (Unicode characters)           |
 | `OLLAMA_HOST`             | python-ai            | `http://localhost:11434` | Ollama API base URL                          |
 | `MODEL_NAME`              | python-ai            | `qwen2.5:1.5b`       | Ollama model to serve                            |
+| `OLLAMA_TIMEOUT_SEC`      | python-ai            | `55`                 | Ollama HTTP timeout (keep below `MODEL_TIMEOUT`) |
 | `IRIS_MODEL_PATH`         | python-ai            | _(unset)_            | Optional path to a pre-trained Iris model        |
 
 See [`.env.example`](.env.example) for a copy-paste template.
@@ -140,38 +142,18 @@ See [`.env.example`](.env.example) for a copy-paste template.
 
 ## Load Testing
 
-Uses [k6](https://k6.io/) to simulate mixed traffic across both endpoints (`test/test.js`). `BASE` is overridable via `-e BASE=<url>` for in-cluster runs.
+Uses [k6](https://k6.io/) (`test/test.js`) against both `/predict/iris` and `/predict/model`. Two ways to run:
+
+### Docker Compose
+
+Start the stack, then run k6 on the host network against `localhost:8080`. This uses the **staged VU profile** and **thresholds** defined in `test/test.js`:
 
 ```bash
-# Local (docker compose) — host network
+docker compose up --build -d
+
 docker run --rm -i --network host grafana/k6 run - < test/test.js
-
-# In Kubernetes — runs k6 as a Job against the Service and watches the HPA
-./deploy.sh test          # or: ./deploy.sh loadtest 120
+# optional: ./deploy.sh gpu   # host GPU exporter for Grafana GPU panels
 ```
-
-Under k6 load test (30 VUs spike): **~8 req/s** total QPS (Iris ~3.9, Model ~4.3), **76 tokens/s** AI throughput (burst peaks ~140 tokens/s), **0% HTTP errors**, GPU utilization up to **80%**, VRAM **~2.5 GB**, GPU temp **~70 °C**, Go gateway RSS **~31 MiB**.
-
-![k6 Load Test — Grafana Dashboard](assets/k6-test.png)
-
-**Observed metrics (Grafana, 30 VUs spike phase):**
-
-| Category | Metric | Value |
-|----------|--------|-------|
-| Throughput | Total QPS | ~8.2 req/s |
-| Throughput | Iris / Model QPS | ~3.9 / ~4.3 req/s |
-| Throughput | AI tokens/s (`qwen2.5:1.5b`) | ~76 (burst ~140) |
-| Latency | Model HTTP p99 | ~4.4 s |
-| Latency | Iris HTTP p95 / p99 | ~2 s / ~3 s |
-| Latency | AI generation p50 / p95 / p99 | ~480 ms / ~500 ms / ~800 ms |
-| Latency | gRPC ModelPredict p50 | ~1.5 s |
-| Errors | HTTP / gRPC error rate | 0% |
-| GPU | Utilization / VRAM / Temp | ~80% / ~2.5 GB / ~70 °C |
-| Go runtime | Goroutines / RSS / GC avg | ~80 / ~31 MiB / ~600 µs |
-
-> AI generation latency (~800 ms p99) is much lower than end-to-end Model HTTP p99 (~4.4 s), indicating most wall-clock time is gateway + gRPC overhead rather than Ollama inference alone — see [Troubleshooting latency](#troubleshooting-latency-grafana--jaeger).
-
-**Load profile:**
 
 | Phase        | Duration | VUs      |
 |--------------|----------|----------|
@@ -181,13 +163,90 @@ Under k6 load test (30 VUs spike): **~8 req/s** total QPS (Iris ~3.9, Model ~4.3
 | Hold spike   | 30 s     | 30       |
 | Ramp-down    | 10 s     | 30 → 0   |
 
-**Thresholds:**
+| Threshold | Target |
+|-----------|--------|
+| Iris p95 latency | < 500 ms |
+| Model p95 latency | < 30 s |
+| HTTP error rate | < 1% |
 
-| Metric | Target | Actual (latest run) |
-|--------|--------|---------------------|
-| Iris p95 latency | < 500 ms | ~2 s HTTP p95 at 30 VU spike (exceeds target under heavy mixed load) |
-| Model p95 latency | < 30 s | ✓ (~4 s HTTP p95) |
-| HTTP error rate | < 1% | ✓ (0% observed in Grafana) |
+### Kubernetes (`./deploy.sh` + `./deploy.sh test`)
+
+Full cluster setup, then an in-cluster k6 Job that also watches HPA scale-up:
+
+```bash
+./deploy.sh          # cluster + images + HPA stack + apps + Docker monitoring + port-forward
+./deploy.sh test     # in-cluster k6 Job + watch HPA scale-up
+./deploy.sh gpu      # optional — host GPU exporter for Grafana GPU panels
+```
+
+`./deploy.sh test` still runs `test/test.js`, but **overrides** the staged profile with a flat load aimed at proving autoscaling:
+
+| Setting | Value | Source |
+|---------|-------|--------|
+| VUs | **40** (constant) | `LOADTEST_PARALLELISM` (default 40) |
+| Duration | **~120 s** | `LOADTEST_DURATION` (default 120) |
+| Thresholds | disabled (`--no-thresholds`) | HPA proof prioritizes scale-up over SLO pass/fail |
+| Target | `http://go-gateway-svc` | in-cluster Service |
+
+Tunable: `LOADTEST_DURATION`, `LOADTEST_PARALLELISM`.
+
+### Observed results (Kubernetes mode)
+
+> Numbers and the Grafana screenshot below are from **Kubernetes mode**: `./deploy.sh` then `./deploy.sh test` on a local `kind` cluster (`kind-ai-gateway`). Grafana scraped the in-cluster gateway via the background port-forward. They are **not** Docker Compose k6 results.
+
+![k6 Load Test — Grafana Dashboard (K8s)](assets/k6.png)
+
+**Grafana metrics during the 40 VU spike:**
+
+| Category | Metric | Value |
+|----------|--------|-------|
+| Throughput | Iris / Model QPS (peak) | ~5 / ~5 req/s |
+| Throughput | AI tokens/s (`qwen2.5:1.5b`) | ~6–7 avg (burst higher during spike) |
+| Latency | Model HTTP / gRPC p99 | ~4.5 s |
+| Latency | Iris HTTP p99 | ~1.5 s (elevated under shared python-ai load) |
+| Latency | AI generation p99 | ~0.8–1.0 s |
+| Errors | HTTP error rate | **~70%** (mostly 500 while python-ai / Ollama saturated) |
+| GPU | Utilization / VRAM / Temp | ~80% / ~2.5 GB / ~75 °C |
+| Go runtime | Goroutines / RSS | ~30 / ~28 MiB |
+
+**How to read this:** the K8s HPA test is intentionally aggressive. A single `python-ai` replica + host Ollama cannot absorb 40 concurrent mixed Iris+LLM clients, so error rate and model latency climb. The Go gateway itself stays light (~28 MiB RSS) — the bottleneck is downstream inference, not the gateway. That is why the HPA metric **excludes** `/predict/model*` paths and scales on gateway-attributable latency (primarily Iris); adding gateway pods cannot make Ollama faster.
+
+**HPA scale-up** (same `./deploy.sh test` run):
+
+```
+══ End-to-end HPA custom-metrics test
+[OK]    custom.metrics.k8s.io API is available
+
+Baseline HPA state:
+NAME             REFERENCE               TARGETS   MINPODS   MAXPODS   REPLICAS
+go-gateway-hpa   Deployment/go-gateway   0/500m    2         10        7
+
+══ Load test — k6 traffic to go-gateway for ~120s (VUs 40)
+  ELAPSED   TARGET(cur/500m)    REPLICAS
+  0s        0/500m              7
+  15s       490m/500m           7
+  30s       1275m/500m          7
+  60s       1671m/500m          7
+  89s       1645m/500m          9
+  148s      1539m/500m          10
+  162s      1538m/500m          10
+
+[OK]    HPA scaled up — peak replicas observed: 10
+
+Events:
+  Normal  SuccessfulRescale  New size: 9;  reason: pods metric p99_latency above target
+  Normal  SuccessfulRescale  New size: 10; reason: pods metric p99_latency above target
+```
+
+| Observation | Expected? | Notes |
+|-------------|-----------|-------|
+| `TARGETS` climbs well above `500m` | Yes | Adapter exposes `p99_latency`; load drives Iris latency up |
+| Replicas stay flat for ~60–90s then jump | Yes | `rate(...[3m])` window + HPA `behavior` (max +2 pods / 60s) |
+| Peak reaches `maxReplicas: 10` | Yes | Script success criterion: peak > `minReplicas` |
+| Early `FailedGetPodsMetric` warnings | Yes | Cold start / no samples yet — HPA holds current replicas |
+| High Grafana error rate under 40 VUs | Yes | Backend saturation; not an HPA failure |
+
+After the test, HPA scales back down over the scale-down stabilization window (~5 minutes).
 
 ## Kubernetes Deployment & Autoscaling
 
@@ -216,23 +275,7 @@ After setup, open Grafana at http://localhost:3000 — metrics appear once traff
 ./deploy.sh test     # generate in-cluster k6 load and watch the HPA scale up
 ```
 
-Representative output (verified on a local `kind` cluster — the `p99_latency` values and
-timing vary run to run, but the scale-up pattern and events are real):
-
-```
-══ Load test — k6 traffic to go-gateway for ~120s (VUs 40)
-  ELAPSED   TARGET(cur/500m)    REPLICAS
-  0s        0/500m              2
-  30s       above 500m          4
-  45s       above 500m          8
-  60s       above 500m          10
-✓ HPA scaled up — peak replicas observed: 10
-
-── Final HPA state + scaling events
-  Normal  SuccessfulRescale  New size: 4;  reason: pods metric p99_latency above target
-  Normal  SuccessfulRescale  New size: 8;  reason: pods metric p99_latency above target
-  Normal  SuccessfulRescale  New size: 10; reason: pods metric p99_latency above target
-```
+See [Observed results (Kubernetes mode)](#observed-results-kubernetes-mode) for Grafana numbers and a sample HPA scale-up from `./deploy.sh` + `./deploy.sh test`.
 
 ### All `deploy.sh` commands
 
@@ -247,7 +290,7 @@ timing vary run to run, but the scale-up pattern and events are real):
 | `./deploy.sh hpa-stack` | Install kube-prometheus-stack + prometheus-adapter |
 | `./deploy.sh apply` | Install HPA stack + apply all manifests |
 | `./deploy.sh monitor` | Start Docker Compose Prometheus/Grafana/Jaeger + background forward |
-| `./deploy.sh forward` | Port-forward gateway → `localhost:8080` / `:6060` (foreground, blocks terminal) |
+| `./deploy.sh forward` | Port-forward gateway → `localhost:8080` (foreground, blocks terminal) |
 | `./deploy.sh forward-stop` | Stop background port-forward started by full setup |
 | `./deploy.sh loadtest [SECONDS]` | Run the in-cluster k6 load generator (default 120s) |
 | `./deploy.sh verify-hpa` | Inspect `custom.metrics.k8s.io` + per-pod `p99_latency` |
@@ -258,18 +301,18 @@ Tunable env vars: `KIND_CLUSTER`, `LOADTEST_DURATION`, `LOADTEST_PARALLELISM`, `
 
 ### Custom-metrics autoscaling pipeline
 
-The HPA scales `go-gateway` on **per-pod HTTP p99 latency** — a Prometheus histogram, not CPU:
+The HPA scales `go-gateway` on **per-pod HTTP p99 latency** — a Prometheus histogram, not CPU. The adapter query **excludes** `/predict/model*` so Ollama-bound latency does not pin the HPA at `maxReplicas`:
 
 ```
 go-gateway Pod (/metrics)
-   │  http_request_duration_seconds_bucket
-   ▼  ServiceMonitor (per-pod scrape)
+   │  http_request_duration_seconds_bucket{path!~"/predict/model.*"}
+   ▼  ServiceMonitor (per-pod scrape, 15s)
 in-cluster Prometheus
-   │  histogram_quantile(0.99, ...) by pod
+   │  histogram_quantile(0.99, rate(...[3m])) by pod
    ▼
 prometheus-adapter  ──►  custom.metrics.k8s.io / pods / p99_latency
    ▼
-HPA (target: 500m = 500ms average)  ──►  Deployment replicas 2 → 10
+HPA (target: 500m = 500ms, behavior: +2/min up, −1/min down)  ──►  replicas 2 → 10
 ```
 
 `k8s/go-gateway-hpa.yaml`:
@@ -283,6 +326,15 @@ metrics:
       target:
         type: AverageValue
         averageValue: "500m"   # 500ms
+behavior:
+  scaleUp:
+    stabilizationWindowSeconds: 60
+    policies:
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+  scaleDown:
+    stabilizationWindowSeconds: 300
 ```
 
 Verify each hop manually:
@@ -299,7 +351,7 @@ kubectl get --raw \
 kubectl describe hpa go-gateway-hpa
 ```
 
-> First reading can take ~1 min after traffic starts (the `rate()` window needs samples); until then the HPA shows `<unknown>` — this is expected.
+> First reading can take ~1–3 min after traffic starts (the `rate()[3m]` window needs samples); until then the HPA may show `<unknown>` or `FailedGetPodsMetric` — this is expected.
 
 ### Dual Prometheus (by design)
 
@@ -370,7 +422,7 @@ Suppose `http_requests_total` for `/predict/model` stays steady (no error spike)
 
 1. In Grafana, plot `grpc_request_duration_seconds` for `ModelPredict` — it should track `ai_generation_duration_seconds`.
 2. In Jaeger, open a slow trace: if the `python-ai` → Ollama portion dominates the timeline, the issue is **model inference** (GPU load, Ollama queue, prompt length), not the gateway.
-3. Cross-check `http_requests_total` by status — if 5xx/`MODEL_TIMEOUT` counts rise at the same time, consider increasing `MODEL_TIMEOUT` or scaling python-ai / Ollama capacity rather than gateway replicas.
+3. Cross-check `http_requests_total` by status — if 5xx/`MODEL_TIMEOUT` counts rise at the same time (as seen under `./deploy.sh test` at 40 VUs), the bottleneck is **python-ai / Ollama capacity**, not gateway replicas. Scaling go-gateway alone will not clear the queue.
 
 ### Optional GPU Metrics Exporter
 
@@ -384,14 +436,14 @@ It exposes metrics at `http://localhost:9835/metrics`.
 
 ### Profiling (pprof)
 
-Go runtime profiling is **disabled by default**. To enable it:
+Go runtime profiling is **disabled by default** and binds to `localhost:6060` when enabled (not exposed via the Kubernetes Service).
 
 ```bash
-# docker compose — set PPROF_ENABLED=true and expose port 6060 (see docker-compose.yml)
+# docker compose — set PPROF_ENABLED=true (and optionally expose 6060; see docker-compose.yml)
 PPROF_ENABLED=true docker compose up --build
 
-# Kubernetes — port-forward after enabling PPROF_ENABLED in the deployment
-./deploy.sh forward   # forwards :8080 and :6060 when pprof is enabled
+# Kubernetes — enable PPROF_ENABLED on the Deployment, then:
+kubectl port-forward deployment/go-gateway 6060:6060
 ```
 
 When enabled, pprof is available at `http://localhost:6060/debug/pprof` — useful for CPU and memory analysis under load.
@@ -419,8 +471,13 @@ When enabled, pprof is available at `http://localhost:6060/debug/pprof` — usef
 │   ├── observability.py    # Logging + tracing setup
 │   ├── server.py           # gRPC server wiring
 │   └── gen/                # Generated gRPC stubs
+├── docs/
+│   └── bugfix-notes.md # High/medium severity bugfix notes
 ├── test/
-│   └── test.js             # k6 load test
+│   └── test.js             # k6 load test (used by ./deploy.sh test)
+├── assets/
+│   ├── gateway-architecture.png
+│   └── k6.png              # Grafana snapshot from ./deploy.sh test
 ├── grafana/                # Grafana provisioning (auto-import on compose up)
 │   ├── provisioning/       # datasource + dashboard provider config
 │   └── dashboards/         # ai-gateway-dashboard.json

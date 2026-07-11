@@ -11,6 +11,8 @@ import (
 // ConnStateProvider exposes gRPC connection state for readiness checks.
 type ConnStateProvider interface {
 	GetState() connectivity.State
+	// Connect kicks an Idle channel into dialing (grpc.NewClient is lazy).
+	Connect()
 }
 
 type HealthHandler struct {
@@ -36,8 +38,14 @@ func (h *HealthHandler) Readyz(c *gin.Context) {
 		return
 	}
 
+	// grpc.NewClient dials lazily: the channel sits in Idle until the first
+	// RPC, so Idle says nothing about whether the backend is reachable.
+	// Trigger a connection attempt and only report ready once it succeeds.
 	state := h.conn.GetState()
-	if state == connectivity.TransientFailure || state == connectivity.Shutdown {
+	if state == connectivity.Idle {
+		h.conn.Connect()
+	}
+	if state != connectivity.Ready {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"status":     "not ready",
 			"grpc_state": state.String(),

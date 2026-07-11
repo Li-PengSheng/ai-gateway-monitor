@@ -15,9 +15,16 @@ rules:
       name:
         matches: "^http_request_duration_seconds_bucket"
         as: "p99_latency"
+      # path!~"/predict/model.*": model latency is Ollama-bound (seconds to
+      # tens of seconds); including it keeps p99 permanently above the 500m
+      # target and pins the HPA at maxReplicas even though adding gateway
+      # pods cannot make Ollama faster. Scale on gateway-attributable
+      # latency only.
+      # [3m] window: at a 15s scrape interval, [1m] holds only ~4 samples
+      # and produces jittery quantiles that cause flapping scale decisions.
       metricsQuery: >
         histogram_quantile(0.99,
           sum by (le, <<.GroupBy>>) (
-            rate(http_request_duration_seconds_bucket{<<.LabelMatchers>>}[1m])
+            rate(http_request_duration_seconds_bucket{<<.LabelMatchers>>,path!~"/predict/model.*"}[3m])
           )
         )

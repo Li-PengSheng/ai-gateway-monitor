@@ -99,9 +99,20 @@ ensure_cluster() {
   fi
 
   if command -v kind &>/dev/null; then
-    warn "No cluster reachable — creating local kind cluster '$KIND_CLUSTER'"
-    kind create cluster --name "$KIND_CLUSTER" --wait 3m
-    kubectl config use-context "kind-$KIND_CLUSTER" >/dev/null 2>&1 || true
+    # Idempotency: `kind create cluster` fails if the cluster already exists
+    # (common after a docker restart, when kubectl briefly can't reach it).
+    if kind get clusters 2>/dev/null | grep -qx "$KIND_CLUSTER"; then
+      warn "kind cluster '$KIND_CLUSTER' exists but is unreachable — re-exporting kubeconfig"
+      kind export kubeconfig --name "$KIND_CLUSTER"
+      kubectl config use-context "kind-$KIND_CLUSTER" >/dev/null 2>&1 || true
+      kubectl cluster-info &>/dev/null \
+        || error "kind cluster '$KIND_CLUSTER' exists but is not responding.
+       Try: kind delete cluster --name $KIND_CLUSTER && ./deploy.sh cluster"
+    else
+      warn "No cluster reachable — creating local kind cluster '$KIND_CLUSTER'"
+      kind create cluster --name "$KIND_CLUSTER" --wait 3m
+      kubectl config use-context "kind-$KIND_CLUSTER" >/dev/null 2>&1 || true
+    fi
     success "kind cluster '$KIND_CLUSTER' ready"
   else
     error "kubectl cannot reach a cluster and 'kind' is not installed.
@@ -562,24 +573,21 @@ start_port_forward_background() {
   kubectl port-forward --address 0.0.0.0 svc/go-gateway-svc 8080:80 \
     > /tmp/go-gateway-forward-8080.log 2>&1 &
   echo $! >> "$FORWARD_PID_FILE"
-  kubectl port-forward --address 0.0.0.0 svc/go-gateway-svc 6060:6060 \
-    > /tmp/go-gateway-forward-6060.log 2>&1 &
-  echo $! >> "$FORWARD_PID_FILE"
 
   sleep 1
   success "Port-forward running in background (PIDs in $FORWARD_PID_FILE)"
   info "  curl http://localhost:8080/healthz"
+  info "  pprof (needs PPROF_ENABLED=true): kubectl port-forward deployment/go-gateway 6060:6060"
   info "  Stop: ./deploy.sh forward-stop"
 }
 
 port_forward_gateway() {
   step "Port-forwarding go-gateway-svc → 0.0.0.0:8080"
   info "Prometheus will scrape metrics at http://host.docker.internal:8080/metrics"
+  info "pprof (needs PPROF_ENABLED=true): kubectl port-forward deployment/go-gateway 6060:6060"
   warn "Keep this terminal open — Ctrl+C to stop"
   echo ""
-  kubectl port-forward --address 0.0.0.0 svc/go-gateway-svc 8080:80 &
-  kubectl port-forward --address 0.0.0.0 svc/go-gateway-svc 6060:6060 &
-  wait
+  kubectl port-forward --address 0.0.0.0 svc/go-gateway-svc 8080:80
 }
 
 start_gpu_exporter() {
@@ -751,7 +759,7 @@ case "$CMD" in
       fi
     fi
     ;;
-  up|all|*)
+  up|all)
     check_deps
     patch_ollama_svc
     patch_prometheus_target
@@ -766,5 +774,10 @@ case "$CMD" in
     start_monitoring
     start_port_forward_background
     show_status
+    ;;
+  *)
+    # A typo must not trigger a full cluster deploy — fail with usage instead.
+    error "Unknown command: '$CMD'
+       Usage: ./deploy.sh [up|build|apply|cluster|hpa-stack|verify-hpa|loadtest|test|monitor|forward|forward-stop|gpu|gpu-stop|status|logs|reset]"
     ;;
 esac

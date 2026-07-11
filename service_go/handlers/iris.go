@@ -4,7 +4,9 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -16,6 +18,21 @@ import (
 	irisv1 "my-go-gateway/gen/iris/v1"
 	"my-go-gateway/metrics"
 )
+
+// maxIrisFeatureCm bounds feature values: iris measurements are a few cm, so
+// anything beyond this is a client error, not a legitimate flower.
+const maxIrisFeatureCm = 50
+
+func validateIrisFeature(name string, v float32) error {
+	f := float64(v)
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return fmt.Errorf("%s must be a finite number", name)
+	}
+	if f < 0 || f > maxIrisFeatureCm {
+		return fmt.Errorf("%s must be between 0 and %d", name, maxIrisFeatureCm)
+	}
+	return nil
+}
 
 type IrisHandler struct {
 	client  irisv1.IrisPredictorClient
@@ -56,6 +73,17 @@ func (h *IrisHandler) Predict(c *gin.Context) {
 		writeValidationError(c, "/predict/iris",
 			"all iris features are required: sepal_length, sepal_width, petal_length, petal_width")
 		return
+	}
+	for name, v := range map[string]float32{
+		"sepal_length": *body.SepalLength,
+		"sepal_width":  *body.SepalWidth,
+		"petal_length": *body.PetalLength,
+		"petal_width":  *body.PetalWidth,
+	} {
+		if err := validateIrisFeature(name, v); err != nil {
+			writeValidationError(c, "/predict/iris", err.Error())
+			return
+		}
 	}
 
 	req := h.reqPool.Get().(*irisv1.IrisPredictRequest)

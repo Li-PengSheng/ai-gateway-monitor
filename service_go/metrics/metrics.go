@@ -13,9 +13,12 @@ var (
 
 	HTTPDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "http_request_duration_seconds",
-			Help:    "Histogram of response latency for HTTP requests.",
-			Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
+			Name: "http_request_duration_seconds",
+			Help: "Histogram of response latency for HTTP requests.",
+			// Upper buckets must cover /predict/model, which can legitimately
+			// take up to MODEL_TIMEOUT (60s); capping at 10s would saturate
+			// p99 for model traffic.
+			Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
 		},
 		[]string{"path"},
 	)
