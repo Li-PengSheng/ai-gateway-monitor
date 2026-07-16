@@ -1,4 +1,3 @@
-// service_go/handlers/model.go
 package handlers
 
 import (
@@ -18,15 +17,27 @@ import (
 	"my-go-gateway/metrics"
 )
 
+// ModelHandler serves POST /predict/model (unary) and /predict/model/stream (SSE)
+// by forwarding ModelPredict / ModelPredictStream RPCs to python-ai.
 type ModelHandler struct {
 	client modelv1.ModelPredictorClient
 	cfg    *config.Config
 }
 
+// NewModelHandler returns a ModelHandler using cfg.ModelTimeout and MaxPromptLen.
 func NewModelHandler(client modelv1.ModelPredictorClient, cfg *config.Config) *ModelHandler {
 	return &ModelHandler{client: client, cfg: cfg}
 }
 
+// Predict handles POST /predict/model (unary JSON response).
+//
+// Request JSON: {"prompt":"..."}. Prompt length is counted in Unicode runes
+// against cfg.MaxPromptLen (not bytes).
+//
+// Success 200 includes reply, model name, and token/duration metrics.
+// Validation → 400; gRPC errors via writeGRPCError (504/503/400/500).
+//
+// Side effects: Prometheus HTTP/gRPC/AI metrics; RPC deadline = cfg.ModelTimeout.
 func (h *ModelHandler) Predict(c *gin.Context) {
 	timer := prometheus.NewTimer(metrics.HTTPDuration.WithLabelValues("/predict/model"))
 	defer timer.ObserveDuration()
@@ -85,8 +96,26 @@ func (h *ModelHandler) Predict(c *gin.Context) {
 	})
 }
 
+// PredictStream handles POST /predict/model/stream as Server-Sent Events.
+//
+// Request JSON: {"prompt":"..."} (same validation as Predict).
+//
+// SSE event types after the gRPC client stream is created:
+//   - event: message — token chunk payload (reply/model/metrics)
+//   - event: done    — stream completed cleanly ({"done":true})
+//   - event: error   — any Recv failure (including backend rejection before the
+//     first chunk) uses code=STREAM_ERROR; HTTP status stays 200
+//
+// Why count HTTP 200 before the first Recv: the SSE headers are committed before
+// consuming the stream, and gRPC server status commonly arrives on Recv rather
+// than during client-stream creation. Those failures cannot change the HTTP
+// status, so clients must inspect event:error. Only client-side stream creation
+// failures use writeGRPCError and a non-200 JSON response.
+//
+// X-Accel-Buffering: no disables nginx proxy buffering so tokens flush promptly.
+//
+// Side effects: Prometheus metrics; RPC deadline = cfg.ModelTimeout.
 func (h *ModelHandler) PredictStream(c *gin.Context) {
-	// 1. HTTP duration timer (same as Predict)
 	timer := prometheus.NewTimer(metrics.HTTPDuration.WithLabelValues("/predict/model/stream"))
 	defer timer.ObserveDuration()
 
@@ -106,7 +135,9 @@ func (h *ModelHandler) PredictStream(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), h.cfg.ModelTimeout)
 	defer cancel()
 
-	// 2. gRPC stream initiation duration
+	// Measure stream setup separately from end-to-end delivery. The generated
+	// client returns after creating the stream, while HTTPDuration remains active
+	// until Gin finishes the SSE response and represents the full stream lifetime.
 	grpcStart := time.Now()
 	stream, err := h.client.ModelPredictStream(ctx, &modelv1.ModelPredictRequest{
 		Prompt: body.Prompt,
@@ -123,21 +154,18 @@ func (h *ModelHandler) PredictStream(c *gin.Context) {
 		return
 	}
 
-	// Set SSE headers
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no") // disable Nginx buffering
+	c.Header("X-Accel-Buffering", "no")
 
-	// 3. Count the stream as 200 once we start sending
 	metrics.HTTPRequestsTotal.WithLabelValues("/predict/model/stream", "200").Inc()
 
 	c.Stream(func(w io.Writer) bool {
 		chunk, err := stream.Recv()
 		if err == io.EOF {
-			// Send a final done event
 			c.SSEvent("done", gin.H{"done": true})
-			return false // stop streaming
+			return false
 		}
 		if err != nil {
 			slog.Error("stream recv error", "error", err)
@@ -149,7 +177,7 @@ func (h *ModelHandler) PredictStream(c *gin.Context) {
 			return false
 		}
 
-		// Record metrics on the final chunk (when eval_count is populated)
+		// Only the final Ollama chunk typically has eval_count populated.
 		if chunk.EvalCount > 0 {
 			metrics.AITokensTotal.WithLabelValues(chunk.ModelName).Add(float64(chunk.EvalCount))
 			metrics.AIGenerationDuration.WithLabelValues(chunk.ModelName).
@@ -165,6 +193,6 @@ func (h *ModelHandler) PredictStream(c *gin.Context) {
 				"duration_sec":  float64(chunk.EvalDuration) / 1e9,
 			},
 		})
-		return true // continue streaming
+		return true
 	})
 }

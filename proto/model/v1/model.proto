@@ -1,24 +1,43 @@
 syntax = "proto3";
 package model.v1;
 
+// Source-level Go package metadata. Buf managed mode overrides the path during
+// generation; the suffix after ';' selects the Go package identifier (modelv1),
+// not the import path used by application code.
 option go_package = "ai-microservice-demo/service_go/gen/model/v1;modelv1";
 
-// 定义请求：用户的问题
+// ModelPredictRequest is a single LLM prompt.
+// Empty/whitespace-only prompts are rejected by python-ai (INVALID_ARGUMENT).
+// Gateway also enforces MaxPromptLen in Unicode runes before forwarding.
 message ModelPredictRequest {
   string prompt = 1;
 }
 
-// 定义响应：大模型的回答
+// ModelPredictResponse is one generation result or one streaming chunk.
+// On ModelPredictStream, intermediate chunks typically have empty eval_* fields;
+// Ollama typically populates token counts and duration on the final chunk.
 message ModelPredictResponse {
+  // Generated text for this response or stream chunk.
   string response = 1;
+  // Ollama model tag used for generation (e.g. qwen2.5:1.5b).
   string model_name = 2;
 
-  int32 prompt_eval_count = 3; // 输入的提示词 Token 数量
-  int32 eval_count = 4;        // 模型生成的 Token 数量
-  int64 eval_duration = 5;     // 模型生成耗时 (通常为纳秒)
+  // Prompt evaluation token count (input tokens). Often 0 on non-final stream chunks.
+  int32 prompt_eval_count = 3;
+  // Generated token count (output tokens). Often 0 on non-final stream chunks.
+  int32 eval_count = 4;
+  // Pure generation duration from Ollama, in nanoseconds.
+  int64 eval_duration = 5;
 }
 
+// ModelPredictor runs LLM inference via Ollama.
+// go-gateway applies MODEL_TIMEOUT (default 60s); other clients set their own deadlines.
+// python-ai defaults OLLAMA_TIMEOUT_SEC to 55s so its worker usually releases first.
 service ModelPredictor {
+  // Unary full-response generation (num_predict capped in the servicer).
   rpc ModelPredict(ModelPredictRequest) returns (ModelPredictResponse);
+
+  // Server-streaming token chunks. Clients must handle cancel/deadline so the
+  // server can stop reading from Ollama (see ModelPredictStream in python-ai).
   rpc ModelPredictStream(ModelPredictRequest) returns (stream ModelPredictResponse);
 }

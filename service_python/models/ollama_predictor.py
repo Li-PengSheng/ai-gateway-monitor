@@ -1,4 +1,5 @@
-# service_python/models/ollama_predictor.py
+"""Ollama-backed LLM gRPC servicer (unary + server streaming)."""
+
 import logging
 
 import httpx
@@ -11,11 +12,14 @@ logger = logging.getLogger("python-ai")
 
 
 def _set_ollama_error(context, e: Exception) -> None:
-    """Map Ollama/transport failures to meaningful gRPC status codes.
+    """Map Ollama/httpx failures to gRPC status on ``context`` (not re-raised).
 
-    The gateway translates these to HTTP: UNAVAILABLE -> 503,
-    DEADLINE_EXCEEDED -> 504, INVALID_ARGUMENT -> 400. Lumping connection
-    errors into INTERNAL would surface dependency outages as 500s.
+    Gateway HTTP mapping: UNAVAILABLE→503, DEADLINE_EXCEEDED→504. Connection
+    errors must not become INTERNAL or dependency outages look like 500s. All
+    ``ollama.ResponseError`` values are intentionally collapsed to UNAVAILABLE:
+    the public gateway contract currently exposes dependency availability, not
+    Ollama-specific status codes such as a missing model. A finer mapping must
+    be introduced together with the gateway API error contract.
     """
     if isinstance(e, httpx.TimeoutException):
         context.set_code(StatusCode.DEADLINE_EXCEEDED)
@@ -29,10 +33,22 @@ def _set_ollama_error(context, e: Exception) -> None:
 
 
 class ModelPredictor(model_pb2_grpc.ModelPredictorServicer):
+    """Implements ``model.v1.ModelPredictor`` (unary + streaming).
+
+    Calls Ollama over HTTP. Keep ``timeout_sec`` slightly below gateway
+    ``MODEL_TIMEOUT`` so worker threads release after the client abandons the RPC.
+    """
+
     def __init__(self, ollama_host: str, model_name: str, timeout_sec: float = 55.0):
-        # Without an explicit timeout httpx waits forever; a hung Ollama call
-        # would then pin a ThreadPoolExecutor worker long after the gateway
-        # (MODEL_TIMEOUT, default 60s) has given up on the RPC.
+        """Create an Ollama client bound to the configured model.
+
+        Args:
+            ollama_host: Ollama base URL (e.g. ``http://localhost:11434``).
+            model_name: Model tag passed to ``generate`` (e.g. ``qwen2.5:1.5b``).
+            timeout_sec: Per-call httpx timeout. Without an explicit value httpx
+                waits forever and a hung Ollama pins a thread-pool worker after
+                the gateway has already timed out.
+        """
         self._client = ollama.Client(host=ollama_host, timeout=timeout_sec)
         self._model_name = model_name
         logger.info(
@@ -43,7 +59,19 @@ class ModelPredictor(model_pb2_grpc.ModelPredictorServicer):
         )
 
     def ModelPredict(self, request, context):
-        # Log only the prompt length: prompt content is user input (PII risk).
+        """Run unary LLM generation for a single prompt.
+
+        Logs prompt length only (not content — PII risk). ``num_predict=512``
+        caps output tokens so a single call cannot run unbounded within the
+        timeout budget. Failures set status on ``context``.
+
+        Args:
+            request: ``ModelPredictRequest``; prompt must be non-empty after strip.
+            context: Servicer context; status set on validation or Ollama failure.
+
+        Returns:
+            Filled ``ModelPredictResponse``, or empty when an error status was set.
+        """
         logger.info("Model predict request: prompt_len=%d", len(request.prompt))
         if not request.prompt.strip():
             context.set_code(StatusCode.INVALID_ARGUMENT)
@@ -74,6 +102,24 @@ class ModelPredictor(model_pb2_grpc.ModelPredictorServicer):
         )
 
     def ModelPredictStream(self, request, context):
+        """Stream LLM tokens; yield one response per Ollama chunk.
+
+        Checks ``context.is_active()`` after each received chunk so client
+        cancellation or a deadline stops further consumption. Cancellation does
+        not interrupt a worker already blocked waiting for the next Ollama chunk,
+        and returning does not explicitly send an Ollama cancellation request;
+        the backend may continue until its HTTP stream closes or its own timeout
+        expires. Eval stats are typically only on the final chunk (ollama>=0.4
+        ``GenerateResponse`` objects, not dicts).
+
+        Args:
+            request: ``ModelPredictRequest``; prompt must be non-empty after strip.
+            context: Servicer context; cancellation is observed between chunks.
+
+        Yields:
+            ``ModelPredictResponse`` chunks from Ollama. Failures set gRPC status
+            via ``_set_ollama_error`` and end the stream without raising.
+        """
         logger.info("Model predict stream request: prompt_len=%d", len(request.prompt))
         if not request.prompt.strip():
             context.set_code(StatusCode.INVALID_ARGUMENT)
@@ -93,12 +139,9 @@ class ModelPredictor(model_pb2_grpc.ModelPredictorServicer):
 
         try:
             for chunk in stream:
-                # Client cancelled (or deadline hit) — stop pulling from Ollama.
                 if not context.is_active():
                     logger.info("Client cancelled stream, stopping Ollama read")
                     return
-                # ollama>=0.4 yields GenerateResponse objects, not dicts.
-                # Only the final chunk has eval stats populated.
                 yield model_pb2.ModelPredictResponse(
                     response=chunk.response or "",
                     model_name=self._model_name,

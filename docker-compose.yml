@@ -25,9 +25,10 @@ services:
     go-gateway:
         build: ./service_go
         ports:
-            - "8080:8080" # REST API
-            # pprof (:6060) is disabled by default. To enable, set PPROF_ENABLED=true
-            # and uncomment the line below:
+            - "8080:8080"
+            # pprof binds to localhost inside the container by default. To expose
+            # it through Docker, also set PPROF_ADDR=0.0.0.0:6060, restrict host
+            # access appropriately, and uncomment the port mapping below.
             # - "6060:6060"
         depends_on:
             python-ai:

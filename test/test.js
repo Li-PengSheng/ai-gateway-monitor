@@ -100,4 +100,6 @@ function testModel() {
   if (!ok) modelErrors.add(1);
 }
 
-//docker run --rm -i --network host grafana/k6 run - < test.js
+// Example (from repo root):
+//   docker run --rm -i --network host grafana/k6 run - < test/test.js
+// In-cluster (Service port 80): k6 run -e BASE=http://go-gateway-svc test/test.js

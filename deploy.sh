@@ -10,7 +10,7 @@
 #    ./deploy.sh            # up: cluster + build + hpa-stack + deploy + monitoring
 #    ./deploy.sh test       # end-to-end HPA proof: load test + watch scale-up
 #    ./deploy.sh status     # pods / services / hpa / metrics API
-#    ./deploy.sh reset      # delete K8s resources + helm stack + stop compose
+#    ./deploy.sh reset      # delete Kubernetes resources + Helm stack + stop Compose
 #
 #  Granular:
 #    ./deploy.sh cluster    # create local kind cluster if none reachable
@@ -18,7 +18,7 @@
 #    ./deploy.sh hpa-stack  # install kube-prometheus-stack + prometheus-adapter
 #    ./deploy.sh apply      # hpa-stack + kubectl apply manifests
 #    ./deploy.sh monitor    # start docker compose monitoring stack
-#    ./deploy.sh forward    # port-forward gateway → localhost:8080 / :6060 (foreground)
+#    ./deploy.sh forward    # port-forward gateway service → localhost:8080 (foreground)
 #    ./deploy.sh forward-stop  # stop background port-forward from full setup
 #    ./deploy.sh loadtest [SECONDS]  # in-cluster load generator (default 120s)
 #    ./deploy.sh verify-hpa # check custom.metrics.k8s.io + HPA metric values
@@ -47,9 +47,9 @@ K8S_DIR="$SCRIPT_DIR/k8s"
 GO_IMAGE="go-gateway:v2"
 PYTHON_IMAGE="python-ai:v2"
 
-# K8s manifests — order matters (paths relative to k8s/)
+# Kubernetes manifests — order matters (paths relative to k8s/)
 K8S_MANIFESTS=(
-  "ollama-svc.yaml"           # ExternalName → WSL Ollama
+  "ollama-svc.yaml"           # Service + Endpoints → WSL Ollama
   "python-ai.yaml"            # python-ai Deployment + Service
   "go-gateway.yaml"           # go-gateway Deployment + Service
   "go-gateway-hpa.yaml"       # HorizontalPodAutoscaler
@@ -74,6 +74,9 @@ LOADTEST_PARALLELISM="${LOADTEST_PARALLELISM:-40}"
 FORWARD_PID_FILE="/tmp/go-gateway-forward.pids"
 
 # ── helpers ───────────────────────────────────────────────────
+# Validate the required local CLIs and ensure kubectl can reach a cluster.
+# Takes no arguments. It may create or repair a kind context via ensure_cluster;
+# missing hard dependencies terminate the script, while Compose is optional.
 check_deps() {
   step "Checking dependencies"
   for cmd in docker kubectl; do
@@ -92,6 +95,8 @@ check_deps() {
 }
 
 # Ensure a reachable cluster; auto-create a local kind cluster when possible.
+# Takes no arguments and returns success only with a reachable kubectl context.
+# Repeated calls reuse the active cluster or existing named kind cluster.
 ensure_cluster() {
   if kubectl cluster-info &>/dev/null; then
     success "kubectl cluster reachable ($(kubectl config current-context 2>/dev/null))"
@@ -120,6 +125,9 @@ ensure_cluster() {
   fi
 }
 
+# Persist the current WSL address into the tracked Endpoints manifest because a
+# pod cannot reach host Ollama through localhost and the WSL eth0 address may
+# change after restart. This function mutates k8s/ollama-svc.yaml in place.
 patch_ollama_svc() {
   step "Patching ollama-svc.yaml with current WSL eth0 IP"
   WSL_IP=$(ip addr show eth0 | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)
@@ -128,11 +136,13 @@ patch_ollama_svc() {
     return
   fi
   info "WSL eth0 IP: $WSL_IP"
-  # Patch the ip field in Endpoints
   sed -i "s|- ip:.*|- ip: $WSL_IP|" "$K8S_DIR/ollama-svc.yaml"
   success "ollama-svc.yaml patched → $WSL_IP"
 }
 
+# Persist the Docker Prometheus target used to scrape the gateway port-forward.
+# This mutates prometheus.yml (or creates it when absent) so Compose can mount a
+# self-contained configuration without runtime templating.
 patch_prometheus_target() {
   step "Patching prometheus.yml scrape target"
 
@@ -156,6 +166,9 @@ EOF
   fi
 }
 
+# Persist the WSL host address for the native GPU exporter. The exporter runs
+# outside Compose, so its dynamically assigned eth0 address must be reachable
+# from the Prometheus container. This mutates prometheus.yml in place.
 patch_prometheus_gpu() {
   step "Patching prometheus.yml GPU exporter target with WSL eth0 IP"
 
@@ -172,11 +185,9 @@ patch_prometheus_gpu() {
   fi
 
   if grep -q 'job_name: "gpu"' "$SCRIPT_DIR/prometheus.yml"; then
-    # Patch existing GPU target IP in place
     sed -i '/job_name: "gpu"/,/targets:/ s|- targets: \[\".*:9835\"\]|- targets: ["'"$WSL_IP"':9835"]|' "$SCRIPT_DIR/prometheus.yml"
     success "prometheus.yml GPU target patched → $WSL_IP:9835"
   else
-    # Append if missing entirely
     cat >> "$SCRIPT_DIR/prometheus.yml" <<EOF
 
   - job_name: "gpu"
@@ -187,6 +198,9 @@ EOF
   fi
 }
 
+# Persist the WSL host address of the Docker-hosted Jaeger collector into both
+# Kubernetes Deployments. Pods cannot use localhost for a host process, and the
+# address may change after WSL restarts. This mutates both manifests in place.
 patch_jaeger_endpoint() {
   step "Patching Jaeger endpoint with current WSL eth0 IP"
   WSL_IP=$(ip addr show eth0 | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)
@@ -196,15 +210,16 @@ patch_jaeger_endpoint() {
   fi
   info "WSL eth0 IP: $WSL_IP"
 
-  # Patch go-gateway.yaml
   sed -i "s|value: \".*:4317\"|value: \"$WSL_IP:4317\"|" "$K8S_DIR/go-gateway.yaml"
   success "go-gateway.yaml Jaeger endpoint patched → $WSL_IP:4317"
 
-  # Patch python-ai.yaml
   sed -i "s|value: \".*:4317\"|value: \"$WSL_IP:4317\"|" "$K8S_DIR/python-ai.yaml"
   success "python-ai.yaml Jaeger endpoint patched → $WSL_IP:4317"
 }
 
+# Build the fixed Go and Python image tags from their service directories.
+# Takes no arguments and replaces matching local tags; a missing service
+# directory is warned and skipped, while a Docker build failure stops the script.
 build_images() {
   step "Building Docker images"
 
@@ -225,10 +240,12 @@ build_images() {
   fi
 }
 
+# Import both local image tags into the cluster selected by the current kubectl
+# context. Takes no arguments. Re-importing is safe for kind/minikube; unknown
+# or remote contexts are left unchanged and require a manual registry push.
 load_images() {
   step "Loading Docker images into the cluster"
 
-  # Use the active kubectl context as the source of truth
   CURRENT_CTX=$(kubectl config current-context 2>/dev/null || echo "")
   info "Active kubectl context: ${CURRENT_CTX:-<none>}"
 
@@ -241,7 +258,6 @@ load_images() {
     done
 
   elif [[ "$CURRENT_CTX" == *"kind"* ]]; then
-    # Extract cluster name from context (format: kind-<clustername>)
     KIND_CLUSTER="${CURRENT_CTX#kind-}"
     info "kind context — loading via 'kind load docker-image' (cluster: $KIND_CLUSTER)"
     for img in "$GO_IMAGE" "$PYTHON_IMAGE"; do
@@ -265,16 +281,22 @@ load_images() {
   fi
 }
 
+# Require Helm for HPA-stack operations; terminates the script when unavailable.
 check_helm() {
   command -v helm &>/dev/null \
     && success "helm found" \
     || error "helm is required — https://helm.sh/docs/intro/install/"
 }
 
+# Return success when the ServiceMonitor CRD indicates the monitoring stack is installed.
 hpa_stack_installed() {
   kubectl get crd servicemonitors.monitoring.coreos.com &>/dev/null
 }
 
+# Install or upgrade Prometheus and prometheus-adapter using the repository
+# values files. Takes no arguments; Helm makes repeated calls idempotent. This
+# changes cluster resources, may update the local Helm repository cache, waits
+# for both releases, and then probes the custom-metrics API.
 install_hpa_stack() {
   step "Installing in-cluster Prometheus stack (HPA metrics)"
   check_helm
@@ -299,6 +321,8 @@ install_hpa_stack() {
   verify_hpa_metrics_api
 }
 
+# Remove both Helm releases and their namespace. Takes no arguments and tolerates
+# absent releases/resources so reset can call it repeatedly.
 uninstall_hpa_stack() {
   step "Removing in-cluster Prometheus stack"
   if command -v helm &>/dev/null; then
@@ -314,6 +338,8 @@ uninstall_hpa_stack() {
     || true
 }
 
+# Poll the custom.metrics API for up to 150 seconds. Takes no arguments; returns
+# zero when available and one after timeout without changing cluster resources.
 verify_hpa_metrics_api() {
   step "Verifying custom.metrics.k8s.io API"
   for _ in $(seq 1 30); do
@@ -328,6 +354,9 @@ verify_hpa_metrics_api() {
   return 1
 }
 
+# Print the Prometheus target, per-pod custom metric, and HPA state. This is a
+# read-only diagnostic; it returns failure only when the ServiceMonitor CRD is
+# absent and otherwise tolerates missing samples so cold starts remain inspectable.
 verify_hpa_pipeline() {
   step "Verifying HPA custom-metrics pipeline"
 
@@ -357,7 +386,7 @@ verify_hpa_pipeline() {
   else
     warn "No p99_latency values yet — generate traffic (k6) and wait ~1m for rate()"
     info "  PromQL in cluster Prometheus:"
-    info "  histogram_quantile(0.99, sum by (le, pod) (rate(http_request_duration_seconds_bucket[1m])))"
+    info "  histogram_quantile(0.99, sum by (le, pod) (rate(http_request_duration_seconds_bucket{path!~\"/predict/model.*\"}[3m])))"
   fi
 
   echo ""
@@ -367,7 +396,12 @@ verify_hpa_pipeline() {
 }
 
 # In-cluster load generator — runs k6 (test/test.js) against go-gateway-svc so it
-# reliably drives p99 latency up. No port-forward needed; then watches the HPA.
+# reliably drives p99 latency up without a port-forward. Thresholds are disabled
+# because this workflow proves HPA reaction under deliberate saturation rather
+# than enforcing the local performance SLOs in test/test.js. Observation is
+# capped at the requested duration plus 45 seconds for reconciliation lag, but
+# may end earlier when the Job's 30-second TTL removes it. Success means the
+# observed replica count exceeds the manifest's current minReplicas value of two.
 run_loadtest() {
   local duration="${1:-$LOADTEST_DURATION}"
   step "Load test — k6 traffic to go-gateway for ~${duration}s (VUs ${LOADTEST_PARALLELISM})"
@@ -447,6 +481,8 @@ EOF
 }
 
 # End-to-end HPA proof: verify pipeline, generate load, confirm scale-up.
+# Takes no arguments. It requires an installed HPA stack, creates the temporary
+# load-test resources through run_loadtest, and prints scaling events.
 run_test() {
   step "End-to-end HPA custom-metrics test"
 
@@ -474,6 +510,8 @@ run_test() {
   success "Test complete — see SuccessfulRescale events above for scale-up proof."
 }
 
+# Restart each existing application Deployment so locally rebuilt fixed image
+# tags are pulled into new pods. Missing Deployments are skipped.
 rollout_restart() {
   step "Forcing rollout restart to pick up new images"
   for deploy in go-gateway python-ai; do
@@ -485,6 +523,9 @@ rollout_restart() {
   done
 }
 
+# Apply K8S_MANIFESTS in dependency order. Repeated kubectl apply calls are
+# idempotent; a ServiceMonitor is skipped without its CRD, while applying the
+# HPA before the adapter is ready is allowed and reported as a warning.
 apply_manifests() {
   step "Applying K8s manifests"
   for f in "${K8S_MANIFESTS[@]}"; do
@@ -514,6 +555,8 @@ apply_manifests() {
   done
 }
 
+# Wait up to 120 seconds for each existing application Deployment. Timeout is
+# reported as a warning rather than terminating the wider setup workflow.
 wait_for_pods() {
   step "Waiting for pods to be ready (120s timeout)"
   for deploy in python-ai go-gateway; do
@@ -526,6 +569,9 @@ wait_for_pods() {
   done
 }
 
+# Start the configured Docker Compose monitoring services in detached mode.
+# Repeated calls converge on the same Compose project. Missing Compose or its
+# file is non-fatal; the function changes the working directory to SCRIPT_DIR.
 start_monitoring() {
   step "Starting monitoring stack (Docker Compose)"
   if ! docker compose version &>/dev/null; then
@@ -549,6 +595,8 @@ start_monitoring() {
   info "  In-cluster Prometheus → ./deploy.sh verify-hpa  (HPA metrics, optional :9091 port-forward)"
 }
 
+# Stop only background port-forward PIDs recorded by this script, then remove
+# the PID file. Missing or stale PIDs are tolerated, making repeated calls safe.
 stop_port_forward() {
   if [[ -f "$FORWARD_PID_FILE" ]]; then
     while read -r pid; do
@@ -559,6 +607,9 @@ stop_port_forward() {
   fi
 }
 
+# Replace the recorded background gateway port-forward and save its PID for
+# forward-stop/reset. Requires go-gateway-svc; writes a log and PID file under
+# /tmp and returns without verifying that the forwarding process stays alive.
 start_port_forward_background() {
   if ! kubectl get svc go-gateway-svc &>/dev/null; then
     warn "go-gateway-svc not found — skipping port-forward (Grafana will have no gateway metrics)"
@@ -567,7 +618,7 @@ start_port_forward_background() {
 
   stop_port_forward
 
-  step "Starting port-forward in background (go-gateway-svc → :8080 / :6060)"
+  step "Starting port-forward in background (go-gateway-svc → :8080)"
   info "Docker Prometheus scrapes http://host.docker.internal:8080/metrics via this tunnel"
 
   kubectl port-forward --address 0.0.0.0 svc/go-gateway-svc 8080:80 \
@@ -581,6 +632,8 @@ start_port_forward_background() {
   info "  Stop: ./deploy.sh forward-stop"
 }
 
+# Run a foreground gateway Service port-forward until interrupted. This blocks,
+# binds all host interfaces on port 8080, and leaves no PID file for forward-stop.
 port_forward_gateway() {
   step "Port-forwarding go-gateway-svc → 0.0.0.0:8080"
   info "Prometheus will scrape metrics at http://host.docker.internal:8080/metrics"
@@ -590,12 +643,15 @@ port_forward_gateway() {
   kubectl port-forward --address 0.0.0.0 svc/go-gateway-svc 8080:80
 }
 
+# Start the exporter through uv, then record the spawned Python process rather
+# than the short-lived launcher so gpu-stop can terminate the long-running job.
+# The pgrep lookup is best-effort and may select an older matching exporter if
+# multiple instances exist; GPU_PID is retained when no Python process is found.
 start_gpu_exporter() {
   cd "$PYTHON_SERVICE_DIR"
   info "Launching gpu_exporter.py in background..."
   nohup uv run gpu_exporter.py > /tmp/gpu_exporter.log 2>&1 &
   GPU_PID=$!
-  # wait for uv to spawn the real python process
   sleep 1
   PYTHON_PID=$(pgrep -f "gpu_exporter.py" | head -1)
   echo "${PYTHON_PID:-$GPU_PID}" > /tmp/gpu_exporter.pid
@@ -606,6 +662,8 @@ start_gpu_exporter() {
   warn "  Stop    → ./deploy.sh gpu-stop"
 }
 
+# Print cluster, optional monitoring-stack, and Compose status. This diagnostic
+# changes the working directory to SCRIPT_DIR when Compose is available.
 show_status() {
   step "Cluster status"
   echo ""
@@ -639,6 +697,7 @@ show_status() {
   echo "  ./deploy.sh forward-stop  # stop background port-forward"
 }
 
+# Follow both Deployment logs concurrently and block until both kubectl jobs exit.
 show_logs() {
   step "Tailing logs from all deployments (Ctrl+C to stop)"
   kubectl logs -f deployment/go-gateway --prefix=true &
@@ -646,6 +705,9 @@ show_logs() {
   wait
 }
 
+# Delete application manifests, the HPA monitoring namespace, recorded
+# port-forwards, and the Compose project. Missing resources are tolerated where
+# the underlying commands use ignore-not-found, so the reset is mostly idempotent.
 reset_all() {
   step "Deleting all K8s resources"
   for f in "${K8S_MANIFESTS[@]}"; do
@@ -750,7 +812,7 @@ case "$CMD" in
         rm /tmp/gpu_exporter.pid
       fi
     else
-      # fallback: try pkill by script name
+      # The PID file may be absent after a manual start or interrupted launch.
       if pgrep -f "gpu_exporter.py" &>/dev/null; then
         pkill -f "gpu_exporter.py"
         success "GPU exporter stopped (via pkill)"

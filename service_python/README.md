@@ -35,8 +35,10 @@ service_python/
 |---|---|---|
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama API base URL |
 | `MODEL_NAME` | `qwen2.5:1.5b` | Ollama model to use for inference |
+| `OLLAMA_TIMEOUT_SEC` | `55` | Per-call HTTP timeout for Ollama; keep below gateway `MODEL_TIMEOUT` |
 | `IRIS_MODEL_PATH` | _(unset)_ | Path to a pre-trained Iris pickle file; trains in memory if unset |
 | `JAEGER_ENDPOINT` | `localhost:4317` | OTLP gRPC endpoint for distributed trace export |
+| `LOG_LEVEL` | `INFO` | Python logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 
 ## Running Locally
 

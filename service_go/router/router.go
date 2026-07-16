@@ -1,3 +1,4 @@
+// Package router wires Gin routes for go-gateway probes, metrics, and predict APIs.
 package router
 
 import (
@@ -7,6 +8,19 @@ import (
 	"my-go-gateway/handlers"
 )
 
+// Setup builds the Gin engine and registers the public HTTP surface:
+//
+//	GET  /metrics
+//	GET  /healthz
+//	GET  /readyz
+//	POST /predict/iris
+//	POST /predict/model
+//	POST /predict/model/stream
+//
+// Parameters: non-nil health, iris, and model handlers. Returns a ready-to-serve
+// *gin.Engine (gin.Default middleware: Logger + Recovery).
+//
+// Side effects: none beyond constructing the engine; does not listen.
 func Setup(
 	health *handlers.HealthHandler,
 	iris *handlers.IrisHandler,

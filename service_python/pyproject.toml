@@ -1,7 +1,7 @@
 [project]
 name = "service-python"
 version = "0.1.0"
-description = "Add your description here"
+description = "gRPC AI inference backend (Iris sklearn + Ollama LLM) for ai-gateway-monitor"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

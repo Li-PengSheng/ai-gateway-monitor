@@ -17,7 +17,7 @@ spec:
           image: python-ai:v2
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 50051 #
+            - containerPort: 50051
           readinessProbe:
             tcpSocket:
               port: 50051
@@ -49,5 +49,4 @@ spec:
     - protocol: TCP
       port: 50051
       targetPort: 50051
-
 

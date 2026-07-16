@@ -1,4 +1,5 @@
-# service_python/observability.py
+"""Structured logging and OpenTelemetry setup for the python-ai gRPC service."""
+
 import logging
 import os
 import sys
@@ -14,6 +15,15 @@ from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapProp
 
 
 def _resolve_log_level() -> int:
+    """Resolve ``LOG_LEVEL`` to a logging constant, defaulting invalid values.
+
+    Returns:
+        A standard-library logging level. Missing values resolve to INFO.
+
+    Side effects:
+        Writes a warning to stderr when the configured value is unsupported;
+        logging is not configured yet, so the warning cannot use a logger.
+    """
     raw = os.getenv("LOG_LEVEL", "INFO")
     levels = {
         "DEBUG": logging.DEBUG,
@@ -32,6 +42,16 @@ def _resolve_log_level() -> int:
 
 
 def setup_logging() -> logging.Logger:
+    """Configure root logging from ``LOG_LEVEL`` and return the service logger.
+
+    Returns:
+        The ``python-ai`` logger used by servicers and lifecycle code.
+
+    Side effects:
+        Configures the process root logger through ``logging.basicConfig``.
+        Calls after logging is already configured may leave existing handlers
+        unchanged, following standard-library behavior.
+    """
     logging.basicConfig(
         level=_resolve_log_level(),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -41,6 +61,20 @@ def setup_logging() -> logging.Logger:
 
 
 def setup_tracing() -> TracerProvider:
+    """Install a global TracerProvider exporting OTLP/gRPC to ``JAEGER_ENDPOINT``.
+
+    Also sets the TraceContext propagator and auto-instruments inbound gRPC
+    RPCs (this service has no HTTP server). Caller must ``shutdown()`` the
+    provider on process exit.
+
+    Returns:
+        Provider used for span export; pass to ``setup_graceful_shutdown``.
+
+    Raises:
+        Exception: Propagated if exporter construction or instrumentation setup
+            fails. Collector unavailability after setup is handled asynchronously
+            by the batch exporter and is not reported by this return path.
+    """
     resource = Resource.create({"service.name": "python-ai"})
     provider = TracerProvider(resource=resource)
 

@@ -19,10 +19,11 @@ spec:
                 - name: go-gateway
                   image: go-gateway:v2
                   ports:
-                      - containerPort: 8080 #
+                      - containerPort: 8080
                   env:
                       - name: AI_SERVICE_ADDR
-                        value: "python-ai-svc:50051" # 使用 K8s Service 名称进行内部通信
+                        # Kubernetes DNS resolves the backend Service inside the cluster.
+                        value: "python-ai-svc:50051"
                       - name: JAEGER_ENDPOINT
                         value: "172.17.141.222:4317"
                   resources:
@@ -50,12 +51,14 @@ kind: Service
 metadata:
     name: go-gateway-svc
     labels:
-        app: go-gateway # 确保这里有标签供 ServiceMonitor 识别
+        # Must match the ServiceMonitor selector so Prometheus discovers this Service.
+        app: go-gateway
 spec:
     selector:
         app: go-gateway
     ports:
-        - name: web # 必须添加这个名称
+        # ServiceMonitor references this named port rather than its numeric value.
+        - name: web
           protocol: TCP
           port: 80
           targetPort: 8080

@@ -1,3 +1,11 @@
+"""python-ai entrypoint: wire logging, tracing, predictors, and the gRPC server.
+
+Startup order matters: logging/tracing first, then servicers (may load models),
+then create_server + signal handlers, then start/wait. Operators should keep
+OLLAMA_TIMEOUT_SEC below the gateway MODEL_TIMEOUT so an abandoned RPC does not
+retain a worker until a longer backend timeout expires; this is not enforced.
+"""
+
 import os
 import sys
 
@@ -15,8 +23,8 @@ if __name__ == "__main__":
     model_predictor = ModelPredictor(
         ollama_host=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
         model_name=os.getenv("MODEL_NAME", "qwen2.5:1.5b"),
-        # Slightly below the gateway's MODEL_TIMEOUT (60s) so the worker thread
-        # is released even when the caller has already given up.
+        # The 55s default stays below the gateway's default 60s MODEL_TIMEOUT;
+        # deployments overriding either value must preserve that ordering.
         timeout_sec=float(os.getenv("OLLAMA_TIMEOUT_SEC", "55")),
     )
 

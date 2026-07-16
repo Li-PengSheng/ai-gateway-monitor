@@ -3,7 +3,8 @@
 Polls nvidia-smi every 5 seconds and exposes GPU utilization, memory usage,
 and temperature as Prometheus gauges on port 9835.
 
-Run independently of Docker Compose:
+Run independently of Docker Compose::
+
     python gpu_exporter.py
 """
 
@@ -17,8 +18,20 @@ gpu_mem = Gauge("nvidia_gpu_memory_used_mb", "GPU memory used MB", ["gpu"])
 gpu_temp = Gauge("nvidia_gpu_temperature", "GPU temperature C", ["gpu"])
 
 
-def collect():
-    """Query nvidia-smi and update Prometheus gauges."""
+def collect() -> None:
+    """Query nvidia-smi and update ``gpu_util`` / ``gpu_mem`` / ``gpu_temp``.
+
+    The main loop does not catch errors, so a failed poll crashes the process
+    (fail-loud so missing scrapes surface the outage).
+
+    Returns:
+        None.
+
+    Raises:
+        FileNotFoundError: If the nvidia-smi executable is not installed.
+        subprocess.CalledProcessError: If nvidia-smi exits non-zero.
+        ValueError: If a CSV line does not split into exactly four fields.
+    """
     out = subprocess.check_output(
         [
             "nvidia-smi",

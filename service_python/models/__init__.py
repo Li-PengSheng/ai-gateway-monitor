@@ -1,4 +1,4 @@
-# service_python/models/__init__.py
+"""Public predictors exported by the models package."""
 
 from .iris_predictor import IrisPredictor
 from .ollama_predictor import ModelPredictor

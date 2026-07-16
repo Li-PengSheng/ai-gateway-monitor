@@ -1,5 +1,3 @@
-// service_go/handlers/iris.go
-
 package handlers
 
 import (
@@ -23,6 +21,11 @@ import (
 // anything beyond this is a client error, not a legitimate flower.
 const maxIrisFeatureCm = 50
 
+// validateIrisFeature rejects non-finite values and measurements outside the
+// inclusive [0, maxIrisFeatureCm] range. The gateway validates before making an
+// RPC to return a stable HTTP 400 cheaply; python-ai repeats the check because
+// gRPC callers may bypass the gateway. It returns nil for a valid measurement
+// and has no side effects.
 func validateIrisFeature(name string, v float32) error {
 	f := float64(v)
 	if math.IsNaN(f) || math.IsInf(f, 0) {
@@ -34,12 +37,18 @@ func validateIrisFeature(name string, v float32) error {
 	return nil
 }
 
+// IrisHandler serves POST /predict/iris by validating JSON features and
+// forwarding an IrisPredict RPC to python-ai.
 type IrisHandler struct {
 	client  irisv1.IrisPredictorClient
 	cfg     *config.Config
 	reqPool sync.Pool
 }
 
+// NewIrisHandler returns an IrisHandler. reqPool reuses the small request proto
+// because this endpoint is the high-throughput, non-LLM path and otherwise
+// allocates the same short-lived object for every call. sync.Pool is only a
+// best-effort cache: the runtime may discard entries at any garbage collection.
 func NewIrisHandler(client irisv1.IrisPredictorClient, cfg *config.Config) *IrisHandler {
 	return &IrisHandler{
 		client: client,
@@ -52,12 +61,23 @@ func NewIrisHandler(client irisv1.IrisPredictorClient, cfg *config.Config) *Iris
 	}
 }
 
+// Predict handles POST /predict/iris.
+//
+// Request JSON (all four floats required; zero is valid):
+//
+//	{"sepal_length":n,"sepal_width":n,"petal_length":n,"petal_width":n}
+//
+// Success 200: {"result":className,"id":classId,"source":"..."}.
+// Validation failures → 400 INVALID_ARGUMENT; gRPC failures via writeGRPCError.
+//
+// Side effects: Prometheus HTTP/gRPC metrics; uses cfg.IrisTimeout as RPC deadline.
+//
+// Why pointer fields: binding:"required" on float32 rejects legitimate 0.0
+// measurements; pointers distinguish "key absent" from "value is 0".
 func (h *IrisHandler) Predict(c *gin.Context) {
 	timer := prometheus.NewTimer(metrics.HTTPDuration.WithLabelValues("/predict/iris"))
 	defer timer.ObserveDuration()
 
-	// Pointer fields distinguish "key absent" from "value is 0". binding:"required"
-	// on float32 would reject legitimate zero measurements (e.g. petal_width: 0).
 	var body struct {
 		SepalLength *float32 `json:"sepal_length"`
 		SepalWidth  *float32 `json:"sepal_width"`
@@ -86,6 +106,8 @@ func (h *IrisHandler) Predict(c *gin.Context) {
 		}
 	}
 
+	// Borrow a request proto from the pool; Reset before Put so pooled objects
+	// never leak previous feature values across requests.
 	req := h.reqPool.Get().(*irisv1.IrisPredictRequest)
 	defer func() {
 		req.Reset()

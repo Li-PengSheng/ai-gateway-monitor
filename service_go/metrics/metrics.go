@@ -1,8 +1,14 @@
+// Package metrics defines Prometheus instruments scraped at GET /metrics.
+//
+// Note: in-cluster HPA (prometheus-adapter) typically filters path labels so
+// Ollama-bound /predict/model* latency does not drive go-gateway autoscaling;
+// see k8s/adapter-values.yaml.
 package metrics
 
 import "github.com/prometheus/client_golang/prometheus"
 
 var (
+	// HTTPRequestsTotal counts finished HTTP requests by path and status code.
 	HTTPRequestsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "http_requests_total",
@@ -11,18 +17,23 @@ var (
 		[]string{"path", "status"},
 	)
 
+	// HTTPDuration observes end-to-end HTTP handler latency by path.
 	HTTPDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name: "http_request_duration_seconds",
 			Help: "Histogram of response latency for HTTP requests.",
-			// Upper buckets must cover /predict/model, which can legitimately
-			// take up to MODEL_TIMEOUT (60s); capping at 10s would saturate
-			// p99 for model traffic.
+			// The 60s upper bucket covers the default MODEL_TIMEOUT; deployments
+			// that raise that timeout must extend these buckets or long requests
+			// collapse into +Inf and make model-latency quantiles uninformative.
 			Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
 		},
 		[]string{"path"},
 	)
 
+	// GRPCRequestDuration observes unary RPC latency and streaming RPC setup
+	// latency by method. ModelPredictStream is recorded when the client stream is
+	// created, not when the stream ends; HTTPDuration covers the full SSE lifetime.
+	// Uses prometheus.DefBuckets (max ~10s); HTTPDuration is the HPA-facing signal.
 	GRPCRequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "grpc_request_duration_seconds",
@@ -32,6 +43,7 @@ var (
 		[]string{"method", "status"},
 	)
 
+	// AITokensTotal counts generated output tokens reported by the model backend.
 	AITokensTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "ai_generated_tokens_total",
@@ -40,6 +52,7 @@ var (
 		[]string{"model"},
 	)
 
+	// AIGenerationDuration observes model-reported pure generation time (ns → s).
 	AIGenerationDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "ai_generation_duration_seconds",
@@ -50,6 +63,10 @@ var (
 	)
 )
 
+// Register registers all package metrics with the default Prometheus registry.
+// Must be called once at process start before /metrics is scraped.
+//
+// Panics if a metric name is already registered (duplicate Register calls).
 func Register() {
 	prometheus.MustRegister(
 		HTTPRequestsTotal,

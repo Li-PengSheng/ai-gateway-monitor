@@ -1,9 +1,13 @@
 syntax = "proto3";
 package iris.v1;
 
+// Source-level Go package metadata. Buf managed mode overrides the path during
+// generation; the suffix after ';' selects the Go package identifier (irisv1),
+// not the import path used by application code.
 option go_package = "ai-microservice-demo/service_go/gen/iris/v1;irisv1";
 
-// 定义请求：鸢尾花的4个特征
+// IrisPredictRequest carries four flower measurements in centimeters.
+// Gateway and python-ai both reject NaN/Inf, negatives, and values > 50.
 message IrisPredictRequest {
   float sepal_length = 1;
   float sepal_width = 2;
@@ -11,13 +15,16 @@ message IrisPredictRequest {
   float petal_width = 4;
 }
 
-// 定义响应：预测的类别（int 或 string）
+// IrisPredictResponse is the predicted iris class.
 message IrisPredictResponse {
+  // Numeric class index from the sklearn iris target encoding (0..2).
   int32 class_id = 1;
+  // Human-readable species name (e.g. setosa, versicolor, virginica).
   string class_name = 2;
 }
 
-// 定义服务接口
+// IrisPredictor classifies a single iris sample (unary RPC).
+// go-gateway applies IRIS_TIMEOUT (default 3s); other clients must set their own deadline.
 service IrisPredictor {
   rpc IrisPredict(IrisPredictRequest) returns (IrisPredictResponse);
 }

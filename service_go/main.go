@@ -1,3 +1,8 @@
+// Command go-gateway is the REST-to-gRPC API gateway process.
+//
+// Startup order: config → logging → optional pprof → metrics → tracing →
+// gRPC dial (+ Connect to leave Idle) → handlers/router → HTTP listen →
+// SIGTERM/SIGINT graceful Shutdown with cfg.ShutdownTimeout.
 package main
 
 import (
@@ -36,10 +41,8 @@ func main() {
 		}()
 	}
 
-	// Metrics
 	metrics.Register()
 
-	// Tracing
 	tp, err := telemetry.InitTracer(context.Background(), cfg.JaegerEndpoint)
 	if err != nil {
 		slog.Error("failed to initialize tracer", "error", err)
@@ -47,23 +50,20 @@ func main() {
 	}
 	defer func() { _ = tp.Shutdown(context.Background()) }()
 
-	// gRPC connection
 	conn, err := grpcclient.Dial(cfg)
 	if err != nil {
 		slog.Error("failed to connect to AI service", "error", err)
 		os.Exit(1)
 	}
 	defer conn.Close()
-	// grpc.NewClient is lazy — start dialing now so /readyz reflects real
-	// backend reachability instead of a permanent Idle state.
+	// grpc.NewClient is lazy — kick the dial at startup so the channel moves
+	// out of Idle before the first /readyz probe (Readyz still requires Ready).
 	conn.Connect()
 
-	// Handlers
 	healthHandler := handlers.NewHealthHandler(conn)
 	irisHandler := handlers.NewIrisHandler(irisv1.NewIrisPredictorClient(conn), cfg)
 	modelHandler := handlers.NewModelHandler(modelv1.NewModelPredictorClient(conn), cfg)
 
-	// Router
 	r := router.Setup(healthHandler, irisHandler, modelHandler)
 
 	srv := &http.Server{
@@ -95,6 +95,7 @@ func main() {
 	slog.Info("Server stopped.")
 }
 
+// parseLogLevel maps cfg.LogLevel strings to slog levels; unknown values → Info.
 func parseLogLevel(level string) slog.Level {
 	switch strings.ToLower(level) {
 	case "debug":
